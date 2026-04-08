@@ -312,6 +312,9 @@ export default function App() {
   const [recipeDetail, setRecipeDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
+  // Connection status
+  const [disconnected, setDisconnected] = useState(false);
+
   // Dialogs
   const [shoppingDialog, setShoppingDialog] = useState(null); // {hasOpened: bool}
   const [deleteDialog, setDeleteDialog] = useState(null); // {id, name}
@@ -343,6 +346,38 @@ export default function App() {
   useEffect(() => {
     loadRecipes();
   }, [loadRecipes]);
+
+  // ── Heartbeat keep-alive (prevents Cloudflare 524 timeout) ───────
+  useEffect(() => {
+    let timer;
+    const ping = async () => {
+      try {
+        const resp = await axios.get(`${API_BACKEND}/config`, { timeout: 10000 });
+        if (resp.data && typeof resp.data === 'object') {
+          setDisconnected(false);
+        } else {
+          setDisconnected(true);
+        }
+      } catch {
+        setDisconnected(true);
+      }
+      timer = setTimeout(ping, 45000);
+    };
+    timer = setTimeout(ping, 45000);
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        clearTimeout(timer);
+        ping();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
 
   // ── Scrape recipe ─────────────────────────────────────────────────
   const handleScrape = useCallback(async () => {
@@ -491,6 +526,19 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      {/* Connection lost banner */}
+      {disconnected && (
+        <div className="mx-4 mb-2 px-4 py-3 rounded-xl bg-amber-600/90 text-white text-sm font-medium flex items-center justify-between">
+          <span>⚠️ Yhteys katkesi — lataa sivu uudelleen</span>
+          <button
+            onClick={() => window.location.reload()}
+            className="ml-3 px-3 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-xs font-semibold transition-colors"
+          >
+            Lataa uudelleen
+          </button>
+        </div>
+      )}
 
       {/* Main content */}
       <main className="px-4 py-4">

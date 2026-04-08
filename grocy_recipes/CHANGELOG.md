@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.1
+
+- Add connection keep-alive heartbeat to prevent Cloudflare 524 timeout when page is open for extended periods
+- Show reconnect banner with reload button when connection is lost
+
 ## 1.1.0
 
 - Fix multilingual recipe support: ingredient names are now always translated to Finnish regardless of recipe language (Swedish, English, etc.)
