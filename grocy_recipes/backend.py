@@ -782,7 +782,10 @@ def _handle_scrape(url: str) -> dict:
                         "location_id": default_loc_id,
                         "qu_id_purchase": default_qu_id,
                         "qu_id_stock": default_qu_id,
+                        "qu_id_consume": default_qu_id,
+                        "qu_id_price": default_qu_id,
                         "treat_opened_as_out_of_stock": 0,
+                        "default_best_before_days": 0,
                     })
                     new_id = resp.get("created_object_id")
                     if new_id:

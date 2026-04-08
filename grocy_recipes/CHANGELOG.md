@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.3
+
+- Fix stub product creation: include all required Grocy fields (qu_id_consume, qu_id_price, default_best_before_days) to prevent 400 errors
+
 ## 1.2.2
 
 - Fix stub product creation: query valid QU and location IDs from Grocy instead of hardcoding ID 1
