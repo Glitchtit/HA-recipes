@@ -4,6 +4,8 @@
 
 - Create stub parent products in Grocy for ingredients that cannot be found via scraper search, instead of failing the entire recipe
 - Recipes now always save successfully even when some products are unavailable in grocery stores
+- Fix product creation payload to match Grocy API requirements
+- Fix recipe_id type conversion to prevent logging errors
 
 ## 1.1.1
 

@@ -456,6 +456,7 @@ def _create_recipe_in_grocy(recipe_data: dict, matched_ingredients: list[dict]) 
     recipe_id = resp.get("created_object_id")
     if not recipe_id:
         raise ValueError("Failed to create recipe in Grocy")
+    recipe_id = int(recipe_id)
 
     log.info("Created recipe '%s' (ID %d)", recipe_data["name"], recipe_id)
 
@@ -747,14 +748,13 @@ def _handle_scrape(url: str) -> dict:
                 "location_id": 1,
                 "qu_id_purchase": 1,
                 "qu_id_stock": 1,
-                "qu_factor_purchase_to_stock": 1,
-                "min_stock_amount": 0,
+                "treat_opened_as_out_of_stock": 0,
             })
             new_id = resp.get("created_object_id")
             if new_id:
-                ing["_product_id"] = new_id
+                ing["_product_id"] = int(new_id)
                 log.info(
-                    "Created stub product '%s' (ID %d)", stub_name, new_id,
+                    "Created stub product '%s' (ID %s)", stub_name, new_id,
                 )
         except Exception as exc:
             log.warning("Failed to create stub product '%s': %s", stub_name, exc)
