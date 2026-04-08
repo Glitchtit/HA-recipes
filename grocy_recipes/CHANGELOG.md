@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1
+
+- Fix recipe ingredient linking: use each product's own qu_id_stock for recipe positions instead of a global lookup that caused 400 errors
+
 ## 1.2.0
 
 - Create stub parent products in Grocy for ingredients that cannot be found via scraper search, instead of failing the entire recipe
