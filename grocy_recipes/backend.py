@@ -467,28 +467,25 @@ def _create_recipe_in_grocy(recipe_data: dict, matched_ingredients: list[dict]) 
             _grocy_put(f"objects/recipes/{recipe_id}", {"picture_file_name": filename})
             log.info("Uploaded recipe image: %s", filename)
 
-    # Get the default quantity unit (piece)
-    qu_id = 1  # Default to piece
-    try:
-        units = _grocy_get("objects/quantity_units")
-        for u in units:
-            if u["name"].lower() in ("kpl", "piece", "stück"):
-                qu_id = u["id"]
-                break
-    except Exception:
-        pass
-
     # Create ingredient positions
+    # Build a product lookup for qu_id resolution
+    all_products = {p["id"]: p for p in _grocy_get("objects/products")}
+
     for ing in matched_ingredients:
         pid = ing.get("_product_id")
         if not pid:
             continue
+        pid = int(pid)
+
+        # Use the product's own stock quantity unit to avoid Grocy validation errors
+        prod = all_products.get(pid, {})
+        ing_qu_id = prod.get("qu_id_stock") or 1
 
         pos_body: dict[str, Any] = {
             "recipe_id": recipe_id,
             "product_id": pid,
             "amount": ing.get("amount") or 1,
-            "qu_id": qu_id,
+            "qu_id": ing_qu_id,
         }
         note_parts = []
         if ing.get("unit"):
