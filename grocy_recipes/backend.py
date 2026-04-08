@@ -129,13 +129,43 @@ def _scraper_available() -> bool:
         return False
 
 
+def _translate_to_finnish_search(ingredient_name: str) -> str:
+    """Translate an ingredient name to a Finnish grocery search term using Gemini.
+
+    The scraper searches Finnish grocery sites, so we need Finnish terms.
+    """
+    prompt = f"""Translate this ingredient name to a short Finnish grocery search term.
+
+Ingredient: "{ingredient_name}"
+
+Return a JSON object: {{"search_term": "finnish search term"}}
+
+Rules:
+- Return a simple Finnish word suitable for searching a Finnish grocery store website (k-ruoka.fi).
+- Use common Finnish grocery terms, e.g.: "torskfilé" → "turska", "butter" → "voi", "cream" → "kerma", "chicken breast" → "kananrinta", "bread crumbs" → "korppujauho"
+- Keep it short — 1-2 words maximum. Just the product type, no brands or quantities.
+- If already in Finnish, return as-is."""
+
+    result = _call_gemini_json(prompt)
+    if result and isinstance(result, dict) and result.get("search_term"):
+        return result["search_term"]
+    return ingredient_name
+
+
 def _scraper_discover(product_name: str) -> dict | None:
-    """Ask grocy-scraper to find and create a product by name search."""
+    """Ask grocy-scraper to find and create a product by name search.
+
+    Translates the ingredient name to a Finnish grocery search term first,
+    since the scraper searches Finnish grocery sites (k-ruoka.fi, s-kaupat.fi).
+    """
+    # Translate to a Finnish grocery search term
+    search_term = _translate_to_finnish_search(product_name)
+    log.info("Scraper search: '%s' → Finnish search term: '%s'", product_name, search_term)
+
     try:
-        # First search for the product
         r = requests.post(
             "http://127.0.0.1:8099/api/scraper/search",
-            json={"query": product_name, "max_products": 3},
+            json={"query": search_term, "max_products": 3},
             timeout=30,
         )
         if not r.ok:
@@ -239,17 +269,22 @@ Return a JSON object with exactly these fields:
   "name": "Recipe name (in the original language of the recipe)",
   "servings": <number of servings as integer>,
   "ingredients": [
-    {{"name": "ingredient name (in Finnish if the recipe is Finnish, otherwise original language)", "amount": <number or null>, "unit": "unit string or null", "note": "any note like 'chopped' or null"}}
+    {{"name": "ingredient name ALWAYS IN FINNISH", "amount": <number or null>, "unit": "unit string or null", "note": "any note like 'chopped' or null"}}
   ],
   "instructions": ["Step 1 text", "Step 2 text", ...]
 }}
 
-Rules:
-- Keep ingredient names as simple product names (e.g. "kananmuna" not "3 kananmunaa")
+CRITICAL LANGUAGE RULES:
+- The recipe may be in Swedish, English, Finnish, or any other language.
+- ALWAYS translate ingredient names to Finnish, regardless of the recipe language.
+  Examples: "smör" (Swedish) → "voi", "butter" (English) → "voi", "torskfilé" → "turskafile", "salt" → "suola", "milk" → "maito", "ägg" → "kananmuna", "flour" → "vehnäjauho", "potatis" → "peruna"
+- Keep ingredient names as simple generic product names (e.g. "kananmuna" not "3 kananmunaa", "voi" not "Valio voi 500g")
+- The recipe name and instructions should stay in the original language of the recipe.
+
+Other rules:
 - Amount should be a number (float), not a string
 - Unit should be a standard abbreviation (dl, ml, l, g, kg, kpl, tl, rkl, rs) or null for count items
 - Instructions should be clear numbered steps
-- If the recipe is in Finnish, keep everything in Finnish
 - Do NOT include any text outside the JSON object"""
 
     result = _call_gemini_json(prompt)
@@ -272,6 +307,8 @@ def _get_all_products() -> list[dict]:
 def _match_ingredient(name: str, products: list[dict]) -> dict | None:
     """Find the best matching Grocy product for an ingredient name.
 
+    Only uses exact match. Substring matching is intentionally avoided to
+    prevent false positives like "salt" → "Lay's Chips Salted".
     Prefers parent products (products that other products reference as parent).
     """
     name_lower = name.lower().strip()
@@ -282,7 +319,7 @@ def _match_ingredient(name: str, products: list[dict]) -> dict | None:
         if p.get("parent_product_id")
     }
 
-    # Exact name match
+    # Exact name match only
     for p in products:
         if p["name"].lower().strip() == name_lower:
             # If this product has a parent, prefer the parent
@@ -294,19 +331,6 @@ def _match_ingredient(name: str, products: list[dict]) -> dict | None:
                 if parent:
                     return parent
             return p
-
-    # Substring match — prefer parent products
-    candidates = []
-    for p in products:
-        p_name = p["name"].lower().strip()
-        if name_lower in p_name or p_name in name_lower:
-            is_parent = p["id"] in parent_ids
-            candidates.append((p, is_parent))
-
-    if candidates:
-        # Sort: parents first, then by name length (shorter = more generic = better)
-        candidates.sort(key=lambda x: (not x[1], len(x[0]["name"])))
-        return candidates[0][0]
 
     return None
 
@@ -328,22 +352,38 @@ def _ai_match_ingredients(
         for p in products
     ]
 
+    ingredient_list = json.dumps(
+        [{"index": i, "name": ing["name"]} for i, ing in enumerate(unmatched)],
+        ensure_ascii=False,
+    )
+    product_list = json.dumps(product_names[:500], ensure_ascii=False)
+
     prompt = f"""Match these recipe ingredients to the closest Grocy product.
 
+IMPORTANT CONTEXT:
+- This household speaks Swedish, Finnish, and English.
+- Recipes may be in ANY of these languages.
+- ALL Grocy product names are in Finnish.
+- Ingredient names below have been translated to Finnish, but may still have slight variations.
+
 Ingredients to match:
-{json.dumps([{"index": i, "name": ing["name"]} for i, ing in enumerate(unmatched)], ensure_ascii=False)}
+{ingredient_list}
 
 Available Grocy products (prefer products where is_parent=true):
-{json.dumps(product_names[:500], ensure_ascii=False)}
+{product_list}
 
 Return a JSON array of objects:
 [{{"index": 0, "product_id": <matched product ID or null if no match>, "confidence": "high"|"medium"|"low"}}]
 
-Rules:
-- Match by ingredient type, not exact brand (e.g. "voita" matches "Voi")
-- Prefer parent products over specific variants
-- Only match with "high" or "medium" confidence — set product_id to null for poor matches
-- A parent product is one that represents a general category (e.g. "Maito" = any milk)"""
+MATCHING RULES:
+- Match by ingredient TYPE and MEANING, not by brand name or substring.
+  Example: "suola" (salt) should match a parent product "Suola" — NOT "Lay's Chips Salted" or any chip/crisp product.
+- "voi" (butter) should match "Voi" parent product — NOT "Voileipäkeksi" (sandwich cookie).
+- Prefer parent products (is_parent=true) over specific product variants.
+- A parent product represents a general category (e.g. "Maito" = any milk, "Voi" = any butter).
+- Only match with "high" or "medium" confidence — set product_id to null for poor or uncertain matches.
+- Do NOT match based on a word appearing inside a brand name or product description.
+- If the ingredient is a basic staple (suola, pippuri, sokeri, voi, maito, jauho), look for the generic parent product."""
 
     result = _call_gemini_json(prompt)
     if not result or not isinstance(result, list):
@@ -678,17 +718,26 @@ def _handle_scrape(url: str) -> dict:
                         ing["name"], match["name"], match["id"],
                     )
 
+        # Re-run AI matching for any still-unmatched after discover
+        still_unmatched_after_discover = [
+            i for i in recipe_data.get("ingredients", [])
+            if i.get("_product_id") is None
+        ]
+        if still_unmatched_after_discover:
+            products = _get_all_products()
+            recipe_data["ingredients"] = _ai_match_ingredients(
+                recipe_data.get("ingredients", []), products
+            )
+
     # 6. Check if any still unmatched
     still_unmatched = [
         i for i in recipe_data.get("ingredients", [])
         if i.get("_product_id") is None
     ]
     if still_unmatched:
-        raise RuntimeError(
-            "Scraper unavailable, try again later. "
-            f"Could not find products for: "
-            + ", ".join(i["name"] for i in still_unmatched)
-        )
+        names = ", ".join(i["name"] for i in still_unmatched)
+        log.warning("Could not find products for: %s", names)
+        raise RuntimeError(f"Could not find products for: {names}")
 
     # 7. Create recipe in Grocy
     result = _create_recipe_in_grocy(recipe_data, recipe_data["ingredients"])

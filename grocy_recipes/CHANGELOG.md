@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0
+
+- Fix multilingual recipe support: ingredient names are now always translated to Finnish regardless of recipe language (Swedish, English, etc.)
+- Remove dangerous substring matching that caused false positives (e.g. "salt" matching "Lay's Chips Salted")
+- Add AI-powered Finnish translation for scraper product discovery
+- Improve AI ingredient matching with strict rules against brand-name false positives
+- Re-run AI matching after product discovery for better results
+- Multilingual household context: Swedish/Finnish/English input, Finnish products
+
 ## 1.0.1
 
 - Fix recipe instructions rendering raw HTML tags instead of formatted text
