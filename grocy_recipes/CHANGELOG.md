@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.0
+
+- Create stub parent products in Grocy for ingredients that cannot be found via scraper search, instead of failing the entire recipe
+- Recipes now always save successfully even when some products are unavailable in grocery stores
+
 ## 1.1.1
 
 - Add connection keep-alive heartbeat to prevent Cloudflare 524 timeout when page is open for extended periods

@@ -729,15 +729,35 @@ def _handle_scrape(url: str) -> dict:
                 recipe_data.get("ingredients", []), products
             )
 
-    # 6. Check if any still unmatched
+    # 6. Create stub parent products for any still-unmatched ingredients
     still_unmatched = [
         i for i in recipe_data.get("ingredients", [])
         if i.get("_product_id") is None
     ]
-    if still_unmatched:
-        names = ", ".join(i["name"] for i in still_unmatched)
-        log.warning("Could not find products for: %s", names)
-        raise RuntimeError(f"Could not find products for: {names}")
+    for ing in still_unmatched:
+        stub_name = ing["name"]
+        log.warning(
+            "No existing product found for '%s' — creating stub parent product",
+            stub_name,
+        )
+        try:
+            resp = _grocy_post("objects/products", {
+                "name": stub_name,
+                "description": "Auto-created by recipe scraper",
+                "location_id": 1,
+                "qu_id_purchase": 1,
+                "qu_id_stock": 1,
+                "qu_factor_purchase_to_stock": 1,
+                "min_stock_amount": 0,
+            })
+            new_id = resp.get("created_object_id")
+            if new_id:
+                ing["_product_id"] = new_id
+                log.info(
+                    "Created stub product '%s' (ID %d)", stub_name, new_id,
+                )
+        except Exception as exc:
+            log.warning("Failed to create stub product '%s': %s", stub_name, exc)
 
     # 7. Create recipe in Grocy
     result = _create_recipe_in_grocy(recipe_data, recipe_data["ingredients"])
