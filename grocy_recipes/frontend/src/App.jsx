@@ -177,13 +177,12 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onDelete }) {
             <h3 className="text-sm font-bold text-gray-300 uppercase tracking-wide mb-2">
               Ohjeet
             </h3>
-            <ol className="space-y-2 text-sm text-gray-300 list-decimal list-inside">
-              {recipe.instructions.map((step, i) => (
-                <li key={i} className="leading-relaxed">
-                  {step}
-                </li>
-              ))}
-            </ol>
+            <div
+              className="prose prose-sm prose-invert max-w-none text-gray-300 [&_p]:mb-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:mb-1 [&_a]:text-emerald-400"
+              dangerouslySetInnerHTML={{
+                __html: recipe.instructions.join(''),
+              }}
+            />
           </div>
         )}
 
