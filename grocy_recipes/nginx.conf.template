@@ -1,0 +1,103 @@
+worker_processes auto;
+pid /var/run/nginx.pid;
+error_log /proc/1/fd/2 warn;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+    sendfile      on;
+    tcp_nopush    on;
+
+    # ── Conditional access logging ────────────────────────────────────
+    map $status $is_error {
+        ~^[^23]  1;
+        default  0;
+    }
+
+    map $request_uri $is_routine {
+        default                                                            0;
+        ~^/api/grocy/(stock|objects/(locations|product_groups|userfields))  1;
+        ~\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)(\?|$)     1;
+    }
+
+    map "$is_routine:$is_error" $loggable {
+        default  1;
+        "1:0"    ${NGINX_LOG_ROUTINE};
+    }
+
+    access_log /proc/1/fd/1 combined if=$loggable;
+
+    server {
+        listen 8099;
+        root  /var/www/html;
+        index index.html;
+
+        # ── Grocy API proxy ────────────────────────────────────────────────
+        location /api/grocy/ {
+            proxy_pass         ${GROCY_BASE_URL}/api/;
+            proxy_set_header   GROCY-API-KEY "${GROCY_API_KEY}";
+            proxy_set_header   Host              $http_host;
+            proxy_set_header   X-Real-IP         $remote_addr;
+            proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_http_version 1.1;
+            proxy_buffering    off;
+        }
+
+        # ── Grocy Scraper proxy ───────────────────────────────────────────
+        location /api/scraper/ {
+            proxy_pass         ${SCRAPER_URL}/api/;
+            proxy_set_header   Host              $http_host;
+            proxy_set_header   X-Real-IP         $remote_addr;
+            proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_http_version 1.1;
+            proxy_buffering    off;
+            proxy_read_timeout 120s;
+            proxy_send_timeout 120s;
+        }
+
+        # ── Recipe backend proxy ──────────────────────────────────────────
+        location /api/backend/ {
+            proxy_pass         http://127.0.0.1:8100/api/;
+            proxy_set_header   Host              $http_host;
+            proxy_set_header   X-Real-IP         $remote_addr;
+            proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_http_version 1.1;
+            proxy_buffering    off;
+            proxy_read_timeout 180s;
+            proxy_send_timeout 180s;
+        }
+
+        # ── Grocy file proxy (for recipe images) ─────────────────────────
+        location /api/grocy-files/ {
+            proxy_pass         ${GROCY_BASE_URL}/api/files/;
+            proxy_set_header   GROCY-API-KEY "${GROCY_API_KEY}";
+            proxy_set_header   Host              $http_host;
+            proxy_set_header   X-Real-IP         $remote_addr;
+            proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_http_version 1.1;
+            proxy_buffering    off;
+        }
+
+        # ── Static assets (long-lived cache) ──────────────────────────────
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+            expires    1y;
+            add_header Cache-Control "public, immutable";
+            try_files  $uri =404;
+        }
+
+        # ── React SPA ─────────────────────────────────────────────────────
+        location / {
+            gzip off;
+            sub_filter
+                '<meta name="ingress-path" content="">'
+                '<meta name="ingress-path" content="$http_x_ingress_path">';
+            sub_filter_once on;
+            add_header Cache-Control "no-cache" always;
+            try_files $uri $uri/ /index.html;
+        }
+    }
+}
