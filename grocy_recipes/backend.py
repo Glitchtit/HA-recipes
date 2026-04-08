@@ -471,15 +471,24 @@ def _create_recipe_in_grocy(recipe_data: dict, matched_ingredients: list[dict]) 
     # Build a product lookup for qu_id resolution
     all_products = {p["id"]: p for p in _grocy_get("objects/products")}
 
+    # Get a known-valid QU ID as fallback
+    fallback_qu_id = None
+    try:
+        units = _grocy_get("objects/quantity_units")
+        if units:
+            fallback_qu_id = units[0]["id"]
+    except Exception:
+        pass
+
     for ing in matched_ingredients:
         pid = ing.get("_product_id")
         if not pid:
             continue
         pid = int(pid)
 
-        # Use the product's own stock quantity unit to avoid Grocy validation errors
+        # Use the product's own stock quantity unit; fall back to first valid QU
         prod = all_products.get(pid, {})
-        ing_qu_id = prod.get("qu_id_stock") or 1
+        ing_qu_id = prod.get("qu_id_stock") or fallback_qu_id or 1
 
         pos_body: dict[str, Any] = {
             "recipe_id": recipe_id,
@@ -500,7 +509,13 @@ def _create_recipe_in_grocy(recipe_data: dict, matched_ingredients: list[dict]) 
         try:
             _grocy_post("objects/recipes_pos", pos_body)
         except Exception as exc:
-            log.warning("Failed to add ingredient %s: %s", ing.get("name"), exc)
+            detail = ""
+            if hasattr(exc, "response") and exc.response is not None:
+                try:
+                    detail = f" — {exc.response.text}"
+                except Exception:
+                    pass
+            log.warning("Failed to add ingredient %s: %s%s", ing.get("name"), exc, detail)
 
     return {"recipe_id": recipe_id, "name": recipe_data["name"]}
 
@@ -732,29 +747,51 @@ def _handle_scrape(url: str) -> dict:
         i for i in recipe_data.get("ingredients", [])
         if i.get("_product_id") is None
     ]
-    for ing in still_unmatched:
-        stub_name = ing["name"]
-        log.warning(
-            "No existing product found for '%s' — creating stub parent product",
-            stub_name,
-        )
+    if still_unmatched:
+        # Look up valid QU and location IDs from Grocy
+        default_qu_id = None
+        default_loc_id = None
         try:
-            resp = _grocy_post("objects/products", {
-                "name": stub_name,
-                "description": "Auto-created by recipe scraper",
-                "location_id": 1,
-                "qu_id_purchase": 1,
-                "qu_id_stock": 1,
-                "treat_opened_as_out_of_stock": 0,
-            })
-            new_id = resp.get("created_object_id")
-            if new_id:
-                ing["_product_id"] = int(new_id)
-                log.info(
-                    "Created stub product '%s' (ID %s)", stub_name, new_id,
+            units = _grocy_get("objects/quantity_units")
+            if units:
+                default_qu_id = units[0]["id"]
+        except Exception:
+            pass
+        try:
+            locs = _grocy_get("objects/locations")
+            if locs:
+                default_loc_id = locs[0]["id"]
+        except Exception:
+            pass
+
+        if default_qu_id is None or default_loc_id is None:
+            log.warning(
+                "Cannot create stub products — no quantity units or locations in Grocy"
+            )
+        else:
+            for ing in still_unmatched:
+                stub_name = ing["name"]
+                log.warning(
+                    "No existing product found for '%s' — creating stub parent product",
+                    stub_name,
                 )
-        except Exception as exc:
-            log.warning("Failed to create stub product '%s': %s", stub_name, exc)
+                try:
+                    resp = _grocy_post("objects/products", {
+                        "name": stub_name,
+                        "description": "Auto-created by recipe scraper",
+                        "location_id": default_loc_id,
+                        "qu_id_purchase": default_qu_id,
+                        "qu_id_stock": default_qu_id,
+                        "treat_opened_as_out_of_stock": 0,
+                    })
+                    new_id = resp.get("created_object_id")
+                    if new_id:
+                        ing["_product_id"] = int(new_id)
+                        log.info(
+                            "Created stub product '%s' (ID %s)", stub_name, new_id,
+                        )
+                except Exception as exc:
+                    log.warning("Failed to create stub product '%s': %s", stub_name, exc)
 
     # 7. Create recipe in Grocy
     result = _create_recipe_in_grocy(recipe_data, recipe_data["ingredients"])

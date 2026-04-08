@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.2
+
+- Fix stub product creation: query valid QU and location IDs from Grocy instead of hardcoding ID 1
+- Fix recipe position linking: fall back to first valid QU when product's qu_id_stock is invalid
+- Add detailed error logging for failed recipe ingredient linking (shows Grocy response body)
+
 ## 1.2.1
 
 - Fix recipe ingredient linking: use each product's own qu_id_stock for recipe positions instead of a global lookup that caused 400 errors
