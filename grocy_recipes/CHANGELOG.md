@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1
+
+- Fix recipe instructions rendering raw HTML tags instead of formatted text
+- Add repository.json for HA Supervisor addon discovery
+
 ## 1.0.0
 
 - Initial release
