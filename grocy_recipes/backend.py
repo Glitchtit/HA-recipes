@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import math
 import os
 import re
 import threading
@@ -115,6 +116,312 @@ def _grocy_put(path: str, data: dict) -> None:
 def _grocy_delete(path: str) -> None:
     r = _grocy().delete(f"{GROCY_URL}/api/{path}")
     r.raise_for_status()
+
+
+# ---------------------------------------------------------------------------
+# Quantity unit management
+# ---------------------------------------------------------------------------
+
+# Standard recipe units with Finnish names
+_STANDARD_UNITS = [
+    {"name": "Gramma", "name_plural": "Grammaa", "description": "g"},
+    {"name": "Kilogramma", "name_plural": "Kilogrammaa", "description": "kg"},
+    {"name": "Millilitra", "name_plural": "Millilitraa", "description": "ml"},
+    {"name": "Desilitra", "name_plural": "Desilitraa", "description": "dl"},
+    {"name": "Litra", "name_plural": "Litraa", "description": "l"},
+    {"name": "Teelusikka", "name_plural": "Teelusikkaa", "description": "tl"},
+    {"name": "Ruokalusikka", "name_plural": "Ruokalusikkaa", "description": "rkl"},
+    {"name": "Ripaus", "name_plural": "Ripausta", "description": "rs"},
+    {"name": "Kappale", "name_plural": "Kappaletta", "description": "kpl"},
+]
+
+# Global conversions between compatible units: (from_abbrev, to_abbrev, factor)
+# "1 <from> = <factor> <to>"
+_GLOBAL_CONVERSIONS = [
+    ("kg", "g", 1000),
+    ("l", "dl", 10),
+    ("l", "ml", 1000),
+    ("dl", "ml", 100),
+    ("rkl", "ml", 15),
+    ("tl", "ml", 5),
+]
+
+# Map common unit string variations to canonical abbreviation
+_UNIT_ALIASES: dict[str, str] = {
+    "g": "g", "gr": "g", "gram": "g", "gramma": "g",
+    "kg": "kg", "kilo": "kg", "kilogramma": "kg",
+    "ml": "ml", "millilitra": "ml",
+    "dl": "dl", "desilitra": "dl",
+    "l": "l", "litra": "l",
+    "tl": "tl", "teelusikka": "tl",
+    "rkl": "rkl", "ruokalusikka": "rkl",
+    "rs": "rs", "ripaus": "rs",
+    "kpl": "kpl", "kappale": "kpl", "pcs": "kpl", "piece": "kpl", "st": "kpl",
+}
+
+# Cache: abbreviation → Grocy QU ID
+_unit_map: dict[str, int] | None = None
+_unit_map_lock = threading.Lock()
+
+
+def _ensure_units_and_conversions() -> dict[str, int]:
+    """Ensure standard recipe units and global conversions exist in Grocy.
+
+    Returns a mapping of unit abbreviation → Grocy QU ID.
+    Idempotent — skips units/conversions that already exist.
+    """
+    global _unit_map
+    with _unit_map_lock:
+        if _unit_map is not None:
+            return _unit_map
+
+        existing_units = _grocy_get("objects/quantity_units")
+        existing_by_desc = {}
+        existing_by_name = {}
+        for u in existing_units:
+            if u.get("description"):
+                existing_by_desc[u["description"].lower().strip()] = u["id"]
+            if u.get("name"):
+                existing_by_name[u["name"].lower().strip()] = u["id"]
+
+        abbrev_to_id: dict[str, int] = {}
+
+        for unit_def in _STANDARD_UNITS:
+            abbrev = unit_def["description"]
+            # Check if unit already exists (by description/abbreviation or name)
+            uid = existing_by_desc.get(abbrev.lower())
+            if uid is None:
+                uid = existing_by_name.get(unit_def["name"].lower())
+            if uid is None:
+                try:
+                    resp = _grocy_post("objects/quantity_units", unit_def)
+                    uid = int(resp.get("created_object_id", 0))
+                    log.info("Created QU '%s' (ID %d)", unit_def["name"], uid)
+                except Exception as exc:
+                    log.warning("Failed to create QU '%s': %s", unit_def["name"], exc)
+                    continue
+            abbrev_to_id[abbrev] = uid
+
+        # Also map the "Piece"/"Pack" defaults if they exist
+        for u in existing_units:
+            name_lower = (u.get("name") or "").lower().strip()
+            if name_lower in ("piece", "pack", "stück"):
+                abbrev_to_id.setdefault("piece", u["id"])
+
+        # Create global conversions
+        existing_conversions = _grocy_get("objects/quantity_unit_conversions")
+        conv_set = set()
+        for c in existing_conversions:
+            if c.get("product_id") is None or c.get("product_id") == "":
+                conv_set.add((int(c["from_qu_id"]), int(c["to_qu_id"])))
+
+        for from_abbrev, to_abbrev, factor in _GLOBAL_CONVERSIONS:
+            from_id = abbrev_to_id.get(from_abbrev)
+            to_id = abbrev_to_id.get(to_abbrev)
+            if from_id is None or to_id is None:
+                continue
+            if (from_id, to_id) in conv_set:
+                continue
+            try:
+                _grocy_post("objects/quantity_unit_conversions", {
+                    "from_qu_id": from_id,
+                    "to_qu_id": to_id,
+                    "factor": factor,
+                })
+                log.info("Created global conversion: 1 %s = %s %s", from_abbrev, factor, to_abbrev)
+            except Exception as exc:
+                log.warning("Failed to create conversion %s→%s: %s", from_abbrev, to_abbrev, exc)
+
+        _unit_map = abbrev_to_id
+        log.info("Unit map initialised: %s", {k: v for k, v in abbrev_to_id.items()})
+        return _unit_map
+
+
+def _get_unit_map() -> dict[str, int]:
+    """Get the cached unit abbreviation → QU ID mapping, initialising if needed."""
+    if _unit_map is not None:
+        return _unit_map
+    return _ensure_units_and_conversions()
+
+
+def _resolve_unit_id(unit_str: str | None) -> int | None:
+    """Resolve a unit string (e.g. 'dl', 'gram', 'l') to a Grocy QU ID."""
+    if not unit_str:
+        return None
+    canonical = _UNIT_ALIASES.get(unit_str.lower().strip())
+    if canonical is None:
+        return None
+    umap = _get_unit_map()
+    return umap.get(canonical)
+
+
+def _canonical_abbrev(unit_str: str | None) -> str | None:
+    """Normalise a unit string to its canonical abbreviation."""
+    if not unit_str:
+        return None
+    return _UNIT_ALIASES.get(unit_str.lower().strip())
+
+
+def _create_product_conversions(
+    matched_ingredients: list[dict], products_by_id: dict[int, dict]
+) -> None:
+    """Use Gemini AI to determine product package sizes and create conversions.
+
+    For each matched product, analyse the product name to determine the package
+    size (e.g. "Arla Kevytmaito 1L" → 1 piece = 1 litre) and create a
+    product-specific quantity unit conversion in Grocy.
+    """
+    umap = _get_unit_map()
+    if not umap:
+        return
+
+    # Collect products that need conversions
+    products_to_check = []
+    for ing in matched_ingredients:
+        pid = ing.get("_product_id")
+        recipe_unit = _canonical_abbrev(ing.get("unit"))
+        if pid is None or recipe_unit is None or recipe_unit == "kpl":
+            continue
+        prod = products_by_id.get(int(pid), {})
+        products_to_check.append({
+            "product_id": int(pid),
+            "product_name": prod.get("name", ""),
+            "recipe_unit": recipe_unit,
+        })
+
+    if not products_to_check:
+        return
+
+    # Check which products already have conversions
+    existing_conversions = _grocy_get("objects/quantity_unit_conversions")
+    products_with_conv: set[int] = set()
+    for c in existing_conversions:
+        cpid = c.get("product_id")
+        if cpid is not None and cpid != "":
+            products_with_conv.add(int(cpid))
+
+    need_conv = [p for p in products_to_check if p["product_id"] not in products_with_conv]
+    if not need_conv:
+        return
+
+    # Deduplicate by product_id
+    seen_pids: set[int] = set()
+    unique_need: list[dict] = []
+    for p in need_conv:
+        if p["product_id"] not in seen_pids:
+            seen_pids.add(p["product_id"])
+            unique_need.append(p)
+
+    product_list = json.dumps(
+        [{"product_id": p["product_id"], "name": p["product_name"]} for p in unique_need],
+        ensure_ascii=False,
+    )
+
+    prompt = f"""Analyse these Finnish grocery product names and determine the package size for each.
+
+Products:
+{product_list}
+
+For each product, determine:
+1. The quantity in the package (e.g. "Arla Kevytmaito 1L" → amount: 1, unit: "l")
+2. The unit of measurement (g, kg, ml, dl, l)
+
+Return a JSON array:
+[{{"product_id": <id>, "amount": <number>, "unit": "g"|"kg"|"ml"|"dl"|"l"|null}}]
+
+RULES:
+- Look for size indicators in the product name (e.g. "1L", "500g", "2kg", "200ml")
+- Finnish products commonly use: g, kg, dl, l, ml
+- If the name contains NO size information, return unit: null
+- Common Finnish package sizes: milk 1L, flour 2kg, butter 500g, cream 2dl
+- "tölkki" / "tlk" usually means a can (330ml for drinks, 400ml/400g for canned goods)
+- Be precise — "500g" means amount: 500, unit: "g" — NOT amount: 0.5, unit: "kg"
+- If multiple sizes appear, use the LAST/most specific one"""
+
+    result = _call_gemini_json(prompt)
+    if not result or not isinstance(result, list):
+        log.warning("Gemini failed to determine product package sizes")
+        return
+
+    piece_id = umap.get("piece") or umap.get("kpl")
+    if piece_id is None:
+        # Try to find a "Piece" unit from existing units
+        all_units = _grocy_get("objects/quantity_units")
+        for u in all_units:
+            name_lower = (u.get("name") or "").lower()
+            if name_lower in ("piece", "pack", "kappale", "stück"):
+                piece_id = u["id"]
+                break
+    if piece_id is None:
+        log.warning("Cannot create product conversions — no Piece unit found")
+        return
+
+    for item in result:
+        pid = item.get("product_id")
+        amount = item.get("amount")
+        unit_abbrev = item.get("unit")
+        if pid is None or amount is None or unit_abbrev is None:
+            continue
+
+        to_qu_id = umap.get(unit_abbrev)
+        if to_qu_id is None:
+            continue
+
+        try:
+            _grocy_post("objects/quantity_unit_conversions", {
+                "from_qu_id": piece_id,
+                "to_qu_id": to_qu_id,
+                "factor": float(amount),
+                "product_id": int(pid),
+            })
+            log.info(
+                "Created conversion for product %d: 1 piece = %s %s",
+                pid, amount, unit_abbrev,
+            )
+        except Exception as exc:
+            log.warning("Failed to create conversion for product %d: %s", pid, exc)
+
+
+def _convert_recipe_to_stock(
+    recipe_amount: float,
+    recipe_qu_id: int,
+    product_id: int,
+    stock_qu_id: int,
+    conversions: list[dict],
+) -> float | None:
+    """Convert a recipe amount to stock units using Grocy conversions.
+
+    Returns the equivalent amount in stock units, or None if no conversion path exists.
+    """
+    if recipe_qu_id == stock_qu_id:
+        return recipe_amount
+
+    # Build a conversion graph for this product + global conversions
+    conv_graph: dict[int, dict[int, float]] = {}
+    for c in conversions:
+        cpid = c.get("product_id")
+        if cpid is not None and cpid != "" and int(cpid) != product_id:
+            continue
+        from_id = int(c["from_qu_id"])
+        to_id = int(c["to_qu_id"])
+        factor = float(c["factor"])
+        conv_graph.setdefault(from_id, {})[to_id] = factor
+        if factor != 0:
+            conv_graph.setdefault(to_id, {})[from_id] = 1.0 / factor
+
+    # BFS to find conversion path from recipe_qu_id to stock_qu_id
+    visited = {recipe_qu_id}
+    queue = [(recipe_qu_id, recipe_amount)]
+    while queue:
+        current_qu, current_amount = queue.pop(0)
+        if current_qu == stock_qu_id:
+            return current_amount
+        for next_qu, factor in conv_graph.get(current_qu, {}).items():
+            if next_qu not in visited:
+                visited.add(next_qu)
+                queue.append((next_qu, current_amount * factor))
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -468,7 +775,6 @@ def _create_recipe_in_grocy(recipe_data: dict, matched_ingredients: list[dict]) 
             log.info("Uploaded recipe image: %s", filename)
 
     # Create ingredient positions
-    # Build a product lookup for qu_id resolution
     all_products = {p["id"]: p for p in _grocy_get("objects/products")}
 
     # Get a known-valid QU ID as fallback
@@ -486,9 +792,15 @@ def _create_recipe_in_grocy(recipe_data: dict, matched_ingredients: list[dict]) 
             continue
         pid = int(pid)
 
-        # Use the product's own stock quantity unit; fall back to first valid QU
         prod = all_products.get(pid, {})
-        ing_qu_id = prod.get("qu_id_stock") or fallback_qu_id or 1
+
+        # Resolve recipe unit to a Grocy QU ID
+        recipe_qu_id = _resolve_unit_id(ing.get("unit"))
+        if recipe_qu_id is not None:
+            ing_qu_id = recipe_qu_id
+        else:
+            # Count items or unknown units — use product's stock QU
+            ing_qu_id = prod.get("qu_id_stock") or fallback_qu_id or 1
 
         pos_body: dict[str, Any] = {
             "recipe_id": recipe_id,
@@ -497,8 +809,6 @@ def _create_recipe_in_grocy(recipe_data: dict, matched_ingredients: list[dict]) 
             "qu_id": ing_qu_id,
         }
         note_parts = []
-        if ing.get("unit"):
-            note_parts.append(ing["unit"])
         if ing.get("note"):
             note_parts.append(ing["note"])
         if ing.get("name"):
@@ -552,28 +862,56 @@ def _get_recipe_detail(recipe_id: int) -> dict:
     products_list = _grocy_get("objects/products")
     products_by_id = {p["id"]: p for p in products_list}
 
+    # Get quantity units for name lookups
+    all_qu = _grocy_get("objects/quantity_units")
+    qu_by_id = {u["id"]: u for u in all_qu}
+
+    # Get all conversions for stock comparison
+    all_conversions = _grocy_get("objects/quantity_unit_conversions")
+
     ingredients = []
     for pos in positions:
         pid = pos.get("product_id")
         product = products_by_id.get(pid, {})
         product_name = product.get("name", f"Product #{pid}")
         needed = pos.get("amount", 1)
+        recipe_qu_id = pos.get("qu_id")
 
         stock_entry = stock_by_product.get(pid)
-        in_stock = 0
+        in_stock_pieces = 0
         amount_opened = 0
         if stock_entry:
-            in_stock = stock_entry.get("amount", 0)
+            in_stock_pieces = stock_entry.get("amount", 0)
             amount_opened = stock_entry.get("amount_opened", 0)
 
-        # Determine status: green, yellow, red
-        if in_stock >= needed:
-            if in_stock == 1 and amount_opened >= 1:
-                status = "yellow"
+        # Resolve unit display name from QU
+        qu = qu_by_id.get(recipe_qu_id, {})
+        unit_abbrev = qu.get("description", "") or ""
+        stock_qu_id = product.get("qu_id_stock")
+
+        # Determine status using unit conversions
+        if recipe_qu_id and stock_qu_id and recipe_qu_id != stock_qu_id:
+            # Convert stock (pieces) to recipe units for comparison
+            stock_in_recipe_units = _convert_recipe_to_stock(
+                in_stock_pieces, stock_qu_id, pid, recipe_qu_id, all_conversions
+            )
+            if stock_in_recipe_units is not None:
+                if stock_in_recipe_units >= needed:
+                    status = "yellow" if in_stock_pieces <= 1 and amount_opened >= 1 else "green"
+                else:
+                    status = "red"
             else:
-                status = "green"
+                # No conversion path — fall back to piece comparison
+                if in_stock_pieces >= 1:
+                    status = "yellow" if amount_opened >= 1 else "green"
+                else:
+                    status = "red"
         else:
-            status = "red"
+            # Same units or count items — direct comparison
+            if in_stock_pieces >= needed:
+                status = "yellow" if in_stock_pieces == 1 and amount_opened >= 1 else "green"
+            else:
+                status = "red"
 
         # Get parent product info
         parent_id = product.get("parent_product_id")
@@ -590,9 +928,8 @@ def _get_recipe_detail(recipe_id: int) -> dict:
             "parent_product_id": parent_id,
             "parent_product_name": parent_name,
             "amount_needed": needed,
-            "amount_in_stock": in_stock,
-            "amount_opened": amount_opened,
-            "unit": pos.get("note", ""),
+            "unit_abbrev": unit_abbrev,
+            "note": pos.get("note", ""),
             "status": status,
         })
 
@@ -622,9 +959,23 @@ def _add_to_shopping_list(recipe_id: int, mode: str) -> dict:
     """Add recipe ingredients to Grocy shopping list.
 
     mode: "missing" | "all" | "missing_and_opened"
+
+    Uses unit conversions to calculate purchase amounts in pieces.
+    E.g. recipe needs 8 dl milk, 1 piece = 1 L = 10 dl → add 1 piece.
     """
     detail = _get_recipe_detail(recipe_id)
     added = 0
+
+    # Load conversions and products for smart amounts
+    all_conversions = _grocy_get("objects/quantity_unit_conversions")
+    products_list = _grocy_get("objects/products")
+    products_by_id = {p["id"]: p for p in products_list}
+    all_qu = _grocy_get("objects/quantity_units")
+    qu_by_id = {u["id"]: u for u in all_qu}
+
+    # Get recipe positions for qu_id lookup
+    all_positions = _grocy_get("objects/recipes_pos")
+    pos_by_id = {p["id"]: p for p in all_positions}
 
     for ing in detail["ingredients"]:
         should_add = False
@@ -644,11 +995,30 @@ def _add_to_shopping_list(recipe_id: int, mode: str) -> dict:
             continue
         pid = int(pid)
 
+        # Calculate how many pieces to buy using conversions
+        purchase_amount = 1
+        pos = pos_by_id.get(ing.get("id"))
+        if pos:
+            recipe_qu_id = pos.get("qu_id")
+            recipe_amount = pos.get("amount", 1)
+            prod = products_by_id.get(pid, {})
+            stock_qu_id = prod.get("qu_id_stock")
+
+            if recipe_qu_id and stock_qu_id and recipe_qu_id != stock_qu_id:
+                # Convert recipe amount to stock units (pieces)
+                amount_in_pieces = _convert_recipe_to_stock(
+                    recipe_amount, recipe_qu_id, pid, stock_qu_id, all_conversions
+                )
+                if amount_in_pieces is not None and amount_in_pieces > 0:
+                    purchase_amount = math.ceil(amount_in_pieces)
+            elif recipe_qu_id == stock_qu_id:
+                purchase_amount = math.ceil(recipe_amount)
+
         try:
             _grocy_post("stock/shoppinglist/add-product", {
                 "product_id": pid,
                 "list_id": 1,
-                "product_amount": 1,
+                "product_amount": purchase_amount,
             })
             added += 1
         except Exception as exc:
@@ -678,6 +1048,9 @@ def _delete_recipe(recipe_id: int) -> None:
 def _handle_scrape(url: str) -> dict:
     """Full pipeline: scrape URL → match products → discover missing → save to Grocy."""
     log.info("Scraping recipe from: %s", url)
+
+    # 0. Ensure standard units and conversions exist in Grocy
+    _ensure_units_and_conversions()
 
     # 1. Scrape the recipe
     recipe_data = _scrape_recipe(url)
@@ -796,7 +1169,15 @@ def _handle_scrape(url: str) -> dict:
                 except Exception as exc:
                     log.warning("Failed to create stub product '%s': %s", stub_name, exc)
 
-    # 7. Create recipe in Grocy
+    # 7. Create product-specific unit conversions via AI
+    products = _get_all_products()
+    products_by_id = {p["id"]: p for p in products}
+    try:
+        _create_product_conversions(recipe_data["ingredients"], products_by_id)
+    except Exception as exc:
+        log.warning("Failed to create product conversions: %s", exc)
+
+    # 8. Create recipe in Grocy
     result = _create_recipe_in_grocy(recipe_data, recipe_data["ingredients"])
     return result
 

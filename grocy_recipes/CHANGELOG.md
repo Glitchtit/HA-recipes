@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.0
+
+- Automated unit handling: auto-create standard recipe units in Grocy (g, kg, dl, l, ml, tl, rkl, rs, kpl) and global conversions (1 l = 10 dl, 1 kg = 1000 g, etc.)
+- Recipe positions now use correct units (e.g. "600 g" instead of "600 Piece")
+- AI-powered product package size detection: Gemini analyses product names to create Grocy unit conversions (e.g. "Maito 1L" → 1 piece = 1 litre)
+- Conversion-aware stock comparison: recipe amounts are compared against stock using unit conversions for accurate green/yellow/red status
+- Smart shopping list: calculates purchase amounts in pieces using unit conversions (e.g. 8 dl milk → 1 piece)
+- Ingredient display shows amount with unit (e.g. "Maito — 8 dl") instead of meaningless piece counts
+
 ## 1.2.3
 
 - Fix stub product creation: include all required Grocy fields (qu_id_consume, qu_id_price, default_best_before_days) to prevent 400 errors

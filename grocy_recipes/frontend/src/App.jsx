@@ -162,8 +162,7 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onDelete }) {
                 <span className="font-medium">{ing.product_name}</span>
                 {ing.amount_needed > 0 && (
                   <span className="text-xs opacity-70 ml-2">
-                    ({ing.amount_in_stock}/{ing.amount_needed}
-                    {ing.amount_opened > 0 && `, ${ing.amount_opened} avattu`})
+                    — {ing.amount_needed}{ing.unit_abbrev ? ` ${ing.unit_abbrev}` : ' kpl'}
                   </span>
                 )}
               </li>
