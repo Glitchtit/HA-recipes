@@ -14,6 +14,7 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from typing import Any
@@ -307,17 +308,22 @@ def _derive_density_conversions(
 
 
 def _create_product_conversions(
-    matched_ingredients: list[dict], products_by_id: dict[int, dict]
+    matched_ingredients: list[dict], products_by_id: dict[int, dict],
+    *, skip_product_ids: set[int] | None = None,
 ) -> None:
     """Use Gemini AI to determine product package sizes and create conversions.
 
     For each matched product, analyse the product name to determine the package
     size (e.g. "Arla Kevytmaito 1L" → 1 piece = 1 litre) and create a
     product-specific quantity unit conversion in Grocy.
+
+    Products in *skip_product_ids* (e.g. stubs with no package info) are skipped.
     """
     umap = _get_unit_map()
     if not umap:
         return
+
+    _skip = skip_product_ids or set()
 
     # Collect products that need conversions
     products_to_check = []
@@ -326,9 +332,12 @@ def _create_product_conversions(
         recipe_unit = _canonical_abbrev(ing.get("unit"))
         if pid is None or recipe_unit is None or recipe_unit == "kpl":
             continue
-        prod = products_by_id.get(int(pid), {})
+        pid = int(pid)
+        if pid in _skip:
+            continue
+        prod = products_by_id.get(pid, {})
         products_to_check.append({
-            "product_id": int(pid),
+            "product_id": pid,
             "product_name": prod.get("name", ""),
             "recipe_unit": recipe_unit,
         })
@@ -483,17 +492,23 @@ def _update_product_default_units(
 
 
 def _ensure_density_conversions(
-    matched_ingredients: list[dict], products_by_id: dict[int, dict]
+    matched_ingredients: list[dict], products_by_id: dict[int, dict],
+    *, skip_product_ids: set[int] | None = None,
 ) -> None:
     """Create cross-domain (weight↔volume) density conversions for products.
 
     For each ingredient whose recipe unit is in a different domain (weight vs
     volume) than the product's existing conversions, use Gemini AI to estimate
     the density and create product-specific conversions.
+
+    Products in *skip_product_ids* (e.g. stubs with no real product info) are
+    skipped — Gemini cannot estimate density for generic names.
     """
     umap = _get_unit_map()
     if not umap:
         return
+
+    _skip = skip_product_ids or set()
 
     existing_conversions = _grocy_get("objects/quantity_unit_conversions")
     id_to_abbrev: dict[int, str] = {v: k for k, v in umap.items()}
@@ -519,6 +534,8 @@ def _ensure_density_conversions(
         if pid is None or recipe_unit is None or recipe_unit == "kpl":
             continue
         pid = int(pid)
+        if pid in _skip:
+            continue
         if pid in seen_pids:
             continue
 
@@ -786,14 +803,59 @@ Rules:
     return ingredient_name
 
 
-def _scraper_discover(product_name: str) -> dict | None:
+def _batch_translate_to_finnish(names: list[str]) -> dict[str, str]:
+    """Translate multiple ingredient names to Finnish search terms in one Gemini call.
+
+    Returns a mapping of original name → Finnish search term.
+    Falls back to the original name if translation fails.
+    """
+    if not names:
+        return {}
+    if len(names) == 1:
+        return {names[0]: _translate_to_finnish_search(names[0])}
+
+    names_json = json.dumps(
+        [{"index": i, "name": n} for i, n in enumerate(names)],
+        ensure_ascii=False,
+    )
+
+    prompt = f"""Translate these ingredient names to short Finnish grocery search terms.
+
+Ingredients:
+{names_json}
+
+Return a JSON array: [{{"index": 0, "search_term": "finnish term"}}]
+
+Rules:
+- Return a simple Finnish word suitable for searching a Finnish grocery store website (k-ruoka.fi).
+- Use common Finnish grocery terms, e.g.: "torskfilé" → "turska", "butter" → "voi", "cream" → "kerma", "chicken breast" → "kananrinta", "bread crumbs" → "korppujauho"
+- Keep it short — 1-2 words maximum per ingredient. Just the product type, no brands or quantities.
+- If already in Finnish, return as-is."""
+
+    result = _call_gemini_json(prompt)
+    mapping: dict[str, str] = {}
+    if result and isinstance(result, list):
+        for item in result:
+            idx = item.get("index")
+            term = item.get("search_term")
+            if idx is not None and term and 0 <= idx < len(names):
+                mapping[names[idx]] = term
+
+    # Fill in any missing translations with original names
+    for n in names:
+        if n not in mapping:
+            mapping[n] = n
+    return mapping
+
+
+def _scraper_discover(product_name: str, search_term: str | None = None) -> dict | None:
     """Ask grocy-scraper to find and create a product by name search.
 
-    Translates the ingredient name to a Finnish grocery search term first,
-    since the scraper searches Finnish grocery sites (k-ruoka.fi, s-kaupat.fi).
+    If *search_term* is provided it is used directly; otherwise the ingredient
+    name is translated to Finnish via a Gemini call first.
     """
-    # Translate to a Finnish grocery search term
-    search_term = _translate_to_finnish_search(product_name)
+    if search_term is None:
+        search_term = _translate_to_finnish_search(product_name)
     log.debug("Scraper search: '%s' → Finnish search term: '%s'", product_name, search_term)
 
     try:
@@ -1427,7 +1489,7 @@ def _handle_scrape(url: str) -> dict:
         len(recipe_data.get("ingredients", [])),
     )
 
-    # 2. Get all Grocy products
+    # 2. Get all Grocy products (cached for the duration of this scrape)
     products = _get_all_products()
 
     # 3. Match ingredients to products
@@ -1444,25 +1506,39 @@ def _handle_scrape(url: str) -> dict:
         recipe_data.get("ingredients", []), products
     )
 
-    # 5. Discover missing products via scraper
+    # 5. Discover missing products via scraper (batch-translated, parallel)
     unmatched = [
         i for i in recipe_data.get("ingredients", [])
         if i.get("_product_id") is None
     ]
 
-    if unmatched:
-        if not _scraper_available():
-            raise RuntimeError(
-                "Scraper unavailable, try again later. "
-                f"{len(unmatched)} ingredient(s) could not be matched: "
-                + ", ".join(i["name"] for i in unmatched)
-            )
+    any_discovered = False
+    if unmatched and _scraper_available():
+        # Batch-translate all ingredient names to Finnish in one Gemini call
+        names = [i["name"] for i in unmatched]
+        translations = _batch_translate_to_finnish(names)
 
-        for ing in unmatched:
-            result = _scraper_discover(ing["name"])
-            if result:
-                # Refresh products to find the newly created one
-                products = _get_all_products()
+        # Discover all ingredients in parallel
+        def _discover_one(ing: dict) -> tuple[dict, dict | None]:
+            search_term = translations.get(ing["name"], ing["name"])
+            return ing, _scraper_discover(ing["name"], search_term=search_term)
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = {pool.submit(_discover_one, ing): ing for ing in unmatched}
+            for fut in as_completed(futures):
+                try:
+                    ing, result = fut.result()
+                    if result:
+                        any_discovered = True
+                except Exception as exc:
+                    log.warning("Scraper discover thread failed: %s", exc)
+
+        if any_discovered:
+            # Refresh products once after all discovers complete
+            products = _get_all_products()
+            for ing in unmatched:
+                if ing.get("_product_id") is not None:
+                    continue
                 match = _match_ingredient(ing["name"], products)
                 if match:
                     ing["_product_id"] = match["id"]
@@ -1471,18 +1547,18 @@ def _handle_scrape(url: str) -> dict:
                         ing["name"], match["name"], match["id"],
                     )
 
-        # Re-run AI matching for any still-unmatched after discover
-        still_unmatched_after_discover = [
-            i for i in recipe_data.get("ingredients", [])
-            if i.get("_product_id") is None
-        ]
-        if still_unmatched_after_discover:
-            products = _get_all_products()
-            recipe_data["ingredients"] = _ai_match_ingredients(
-                recipe_data.get("ingredients", []), products
-            )
+            # Re-run AI matching only if discovers succeeded
+            still_unmatched_after_discover = [
+                i for i in recipe_data.get("ingredients", [])
+                if i.get("_product_id") is None
+            ]
+            if still_unmatched_after_discover:
+                recipe_data["ingredients"] = _ai_match_ingredients(
+                    recipe_data.get("ingredients", []), products
+                )
 
     # 6. Create stub parent products for any still-unmatched ingredients
+    stub_product_ids: set[int] = set()
     still_unmatched = [
         i for i in recipe_data.get("ingredients", [])
         if i.get("_product_id") is None
@@ -1530,17 +1606,21 @@ def _handle_scrape(url: str) -> dict:
                     new_id = resp.get("created_object_id")
                     if new_id:
                         ing["_product_id"] = int(new_id)
+                        stub_product_ids.add(int(new_id))
                         log.debug(
                             "Created stub product '%s' (ID %s)", stub_name, new_id,
                         )
                 except Exception as exc:
                     log.warning("Failed to create stub product '%s': %s", stub_name, exc)
 
-    # 7. Create product-specific unit conversions via AI
+    # 7. Create product-specific unit conversions via AI (skip stubs)
     products = _get_all_products()
     products_by_id = {p["id"]: p for p in products}
     try:
-        _create_product_conversions(recipe_data["ingredients"], products_by_id)
+        _create_product_conversions(
+            recipe_data["ingredients"], products_by_id,
+            skip_product_ids=stub_product_ids,
+        )
     except Exception as exc:
         log.warning("Failed to create product conversions: %s", exc)
 
@@ -1550,12 +1630,15 @@ def _handle_scrape(url: str) -> dict:
     except Exception as exc:
         log.warning("Failed to update product default units: %s", exc)
 
-    # 7c. Create cross-domain density conversions (weight↔volume)
+    # 7c. Create cross-domain density conversions (weight↔volume, skip stubs)
     # Refresh products_by_id to include any default-unit changes from 7b
     products = _get_all_products()
     products_by_id = {p["id"]: p for p in products}
     try:
-        _ensure_density_conversions(recipe_data["ingredients"], products_by_id)
+        _ensure_density_conversions(
+            recipe_data["ingredients"], products_by_id,
+            skip_product_ids=stub_product_ids,
+        )
     except Exception as exc:
         log.warning("Failed to create density conversions: %s", exc)
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.6
+
+- Major performance improvement: recipe scraping reduced from ~3 min to ~45s
+- Batch-translate all ingredient names to Finnish in one Gemini call instead of N sequential calls
+- Parallel scraper discovery using ThreadPoolExecutor (max 4 concurrent searches)
+- Skip stub products in package-size and density conversion analysis (eliminates primary 504 timeout cause)
+- Skip redundant second AI match pass when no scraper discoveries succeed
+- Graceful handling when grocy_scraper addon is unavailable (no longer blocks recipe creation)
+
 ## 1.3.5
 
 - Propagate density conversions from parent products to all child products (Grocy does not inherit product-specific conversions)
