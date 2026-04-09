@@ -56,7 +56,10 @@ _GEMINI_MAX_RETRIES = 3
 def _get_gemini() -> genai.Client:
     global _gemini_client
     if _gemini_client is None:
-        _gemini_client = genai.Client(api_key=GEMINI_KEY)
+        _gemini_client = genai.Client(
+            api_key=GEMINI_KEY,
+            http_options={"timeout": 120_000},
+        )
     return _gemini_client
 
 
@@ -247,11 +250,15 @@ def _get_unit_map() -> dict[str, int]:
 
 
 def _resolve_unit_id(unit_str: str | None) -> int | None:
-    """Resolve a unit string (e.g. 'dl', 'gram', 'l') to a Grocy QU ID."""
+    """Resolve a unit string (e.g. 'dl', 'gram', 'l') to a Grocy QU ID.
+
+    Returns None for count/piece units ('kpl') so the caller falls back
+    to the product's stock QU — which is already the count unit.
+    """
     if not unit_str:
         return None
     canonical = _UNIT_ALIASES.get(unit_str.lower().strip())
-    if canonical is None:
+    if canonical is None or canonical == "kpl":
         return None
     umap = _get_unit_map()
     return umap.get(canonical)
@@ -1315,9 +1322,14 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 result = _handle_scrape(url)
                 return self._json({"success": True, **result})
+            except BrokenPipeError:
+                log.info("Client disconnected before scrape response was sent")
             except Exception as exc:
                 log.exception("Scrape failed")
-                return self._json({"success": False, "error": str(exc)}, 500)
+                try:
+                    return self._json({"success": False, "error": str(exc)}, 500)
+                except BrokenPipeError:
+                    pass
             finally:
                 _op_lock.release()
 

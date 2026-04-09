@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.3
+
+- Fix "kananmuna" (egg) QU constraint error: count/piece units (kpl, st, pcs) now use the product's stock QU directly instead of resolving to a separate Kappale unit
+- Fix scrape timeout: increase nginx backend proxy timeout from 180s to 600s to handle slow Gemini API calls
+- Add 120s timeout to Gemini API client to prevent infinite hangs
+- Handle BrokenPipeError gracefully when client disconnects during long scrapes
+
 ## 1.3.2
 
 - Fix recipe ingredient creation failing with "Provided qu_id doesn't have a related conversion for that product"
