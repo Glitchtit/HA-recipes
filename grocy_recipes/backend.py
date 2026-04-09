@@ -55,6 +55,22 @@ _AI_KEY_MAX_RETRIES = 30
 _AI_KEY_RETRY_INTERVAL = 5  # seconds
 
 
+def wait_for_storage(base_url: str, max_retries: int = 30, delay: float = 5.0) -> None:
+    """Block until Storage addon is reachable."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = requests.get(f"{base_url}/api/health", timeout=5)
+            if resp.ok:
+                log.info("Storage addon is ready (%s).", resp.json().get("version", "?"))
+                return
+        except requests.RequestException:
+            pass
+        if attempt < max_retries:
+            log.info("Storage not ready (attempt %d/%d), retrying in %.0fs…", attempt, max_retries, delay)
+            time.sleep(delay)
+    raise SystemExit("ERROR: Storage addon not reachable after %d attempts." % max_retries)
+
+
 def _fetch_ai_key_from_storage() -> None:
     """Fetch Gemini API key/model from Storage's ``/api/config/ai-key``.
 
@@ -1782,6 +1798,8 @@ def main() -> None:
     log.info("Starting recipe backend on port %d (debug=%s)", PORT, _DEBUG)
     log.info("Storage URL: %s", STORAGE_URL)
 
+    if STORAGE_URL:
+        wait_for_storage(STORAGE_URL)
     _fetch_ai_key_from_storage()
     log.info("Gemini model: %s", GEMINI_MODEL)
 

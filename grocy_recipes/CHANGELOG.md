@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.2
+
+- Backend waits for Storage health check on startup before serving requests
+- Frontend shows waiting state with spinner until Storage is reachable
+- Renamed addon display name from "Grocy Recipes" to "Recipe"
+
 ## 1.4.1
 
 - Fetch Gemini AI key from Storage addon (`GET /api/config/ai-key`) instead of requiring local config

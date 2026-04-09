@@ -8,6 +8,7 @@ const INGRESS_PATH =
   document.querySelector('meta[name="ingress-path"]')?.content ?? '';
 
 const API_BACKEND = `${INGRESS_PATH}/api/backend`;
+const API_STORAGE = `${INGRESS_PATH}/api/storage`;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -298,6 +299,7 @@ function DeleteConfirmDialog({ recipeName, onConfirm, onClose }) {
 // App
 // ---------------------------------------------------------------------------
 export default function App() {
+  const [storageReady, setStorageReady] = useState(false);
   const [recipes, setRecipes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [scraping, setScraping] = useState(false);
@@ -326,6 +328,24 @@ export default function App() {
     );
   }, []);
 
+  // ── Storage health check ──────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    let timer;
+    const check = async () => {
+      try {
+        const { data } = await axios.get(`${API_STORAGE}/health`, { timeout: 5000 });
+        if (!cancelled && data && data.version) {
+          setStorageReady(true);
+          return;
+        }
+      } catch { /* retry */ }
+      if (!cancelled) timer = setTimeout(check, 5000);
+    };
+    check();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, []);
+
   // ── Load recipes ──────────────────────────────────────────────────
   const loadRecipes = useCallback(async () => {
     try {
@@ -341,8 +361,8 @@ export default function App() {
   }, [addToast]);
 
   useEffect(() => {
-    loadRecipes();
-  }, [loadRecipes]);
+    if (storageReady) loadRecipes();
+  }, [storageReady, loadRecipes]);
 
   // ── Heartbeat keep-alive (prevents Cloudflare 524 timeout) ───────
   useEffect(() => {
@@ -475,11 +495,23 @@ export default function App() {
   }, [deleteDialog, addToast, closeDetail, loadRecipes]);
 
   // ── Render ────────────────────────────────────────────────────────
+  if (!storageReady) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-gray-100 flex flex-col items-center justify-center gap-4">
+        <svg className="animate-spin h-8 w-8 text-emerald-400" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
+        <p className="text-gray-400 text-sm">Odotetaan Storage-lisäosaa…</p>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100">
       {/* Header */}
       <header className="sticky top-0 z-30 bg-gray-900/90 backdrop-blur-md border-b border-gray-800 px-4 py-3">
-        <h1 className="text-lg font-bold text-center mb-3">🍽️ Grocy Recipes</h1>
+        <h1 className="text-lg font-bold text-center mb-3">🍽️ Recipe</h1>
 
         {/* URL input */}
         <div className="flex gap-2">
