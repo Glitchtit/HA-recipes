@@ -535,8 +535,10 @@ def _ensure_density_conversions(
         has_weight = bool(prod_units & _WEIGHT_UNITS)
         has_volume = bool(prod_units & _VOLUME_UNITS)
 
-        # Already has cross-domain conversions — nothing to do
+        # Already has cross-domain conversions — skip Gemini, but still
+        # track for child propagation below.
         if has_weight and has_volume:
+            seen_pids.add(pid)
             continue
 
         # Recipe needs a domain the product doesn't have
@@ -566,12 +568,13 @@ def _ensure_density_conversions(
         })
         seen_pids.add(pid)
 
+    created = 0
     if not need_density:
-        return
+        log.debug("No products need new density conversions from Gemini.")
+    else:
+        product_list = json.dumps(need_density, ensure_ascii=False)
 
-    product_list = json.dumps(need_density, ensure_ascii=False)
-
-    prompt = f"""For each Finnish grocery product below, estimate the density conversion
+        prompt = f"""For each Finnish grocery product below, estimate the density conversion
 between weight and volume units. Products already have a size in one domain
 (weight or volume) — provide the conversion to the OTHER domain.
 
@@ -596,66 +599,63 @@ RULES:
 - If you cannot reasonably estimate the density, return null for factor
 - Use the SIMPLEST conversion (prefer kg↔l over g↔ml)"""
 
-    result = _call_gemini_json(prompt)
-    if not result or not isinstance(result, list):
-        log.warning("Gemini failed to estimate density conversions")
-        return
+        result = _call_gemini_json(prompt)
+        if not result or not isinstance(result, list):
+            log.warning("Gemini failed to estimate density conversions")
+        else:
+            for item in result:
+                pid = item.get("product_id")
+                factor = item.get("factor")
+                from_unit = item.get("from_unit")
+                to_unit = item.get("to_unit")
+                if pid is None or factor is None or from_unit is None or to_unit is None:
+                    continue
 
-    created = 0
-    for item in result:
-        pid = item.get("product_id")
-        factor = item.get("factor")
-        from_unit = item.get("from_unit")
-        to_unit = item.get("to_unit")
-        if pid is None or factor is None or from_unit is None or to_unit is None:
-            continue
+                from_id = umap.get(from_unit)
+                to_id = umap.get(to_unit)
+                if from_id is None or to_id is None:
+                    continue
 
-        from_id = umap.get(from_unit)
-        to_id = umap.get(to_unit)
-        if from_id is None or to_id is None:
-            continue
+                try:
+                    _grocy_post("objects/quantity_unit_conversions", {
+                        "from_qu_id": from_id,
+                        "to_qu_id": to_id,
+                        "factor": float(factor),
+                        "product_id": int(pid),
+                    })
+                    log.info(
+                        "Created density conversion for product %d (%s): 1 %s = %s %s",
+                        pid, products_by_id.get(pid, {}).get("name", ""), from_unit, factor, to_unit,
+                    )
+                    created += 1
+                except Exception as exc:
+                    log.warning("Failed to create density conversion for product %d: %s", pid, exc)
+                    continue
 
-        try:
-            _grocy_post("objects/quantity_unit_conversions", {
-                "from_qu_id": from_id,
-                "to_qu_id": to_id,
-                "factor": float(factor),
-                "product_id": int(pid),
-            })
-            log.info(
-                "Created density conversion for product %d (%s): 1 %s = %s %s",
-                pid, products_by_id.get(pid, {}).get("name", ""), from_unit, factor, to_unit,
-            )
-            created += 1
-        except Exception as exc:
-            log.warning("Failed to create density conversion for product %d: %s", pid, exc)
-            continue
+                # Create derived cross-domain conversions
+                derived = _derive_density_conversions(from_unit, to_unit, float(factor))
+                for d_from, d_to, d_factor in derived:
+                    d_from_id = umap.get(d_from)
+                    d_to_id = umap.get(d_to)
+                    if d_from_id is None or d_to_id is None:
+                        continue
+                    try:
+                        _grocy_post("objects/quantity_unit_conversions", {
+                            "from_qu_id": d_from_id,
+                            "to_qu_id": d_to_id,
+                            "factor": d_factor,
+                            "product_id": int(pid),
+                        })
+                        created += 1
+                    except Exception:
+                        pass  # likely already exists
 
-        # Create derived cross-domain conversions
-        derived = _derive_density_conversions(from_unit, to_unit, float(factor))
-        for d_from, d_to, d_factor in derived:
-            d_from_id = umap.get(d_from)
-            d_to_id = umap.get(d_to)
-            if d_from_id is None or d_to_id is None:
-                continue
-            try:
-                _grocy_post("objects/quantity_unit_conversions", {
-                    "from_qu_id": d_from_id,
-                    "to_qu_id": d_to_id,
-                    "factor": d_factor,
-                    "product_id": int(pid),
-                })
-                created += 1
-            except Exception:
-                pass  # likely already exists
-
-    # Propagate density conversions from parent products to their children.
+    # Always propagate density conversions from parent products to children.
     # Grocy does NOT inherit conversions from parent products, so each child
-    # needs its own copy for Grocy to resolve recipe units against stock.
-    if created:
-        # Refresh conversions after creation
+    # needs its own copy. This runs even when no new parent conversions were
+    # created — the parent may already have them from a previous scrape.
+    if seen_pids:
         all_convs = _grocy_get("objects/quantity_unit_conversions")
-        # Build parent→children map
         children_of: dict[int, list[int]] = {}
         for p in products_by_id.values():
             ppid = p.get("parent_product_id")
@@ -666,7 +666,6 @@ RULES:
             child_ids = children_of.get(pid, [])
             if not child_ids:
                 continue
-            # Collect density conversions we just created for the parent
             parent_density = [
                 c for c in all_convs
                 if c.get("product_id") is not None
@@ -677,7 +676,6 @@ RULES:
             ]
             if not parent_density:
                 continue
-            # Collect existing child conversion pairs to avoid duplicates
             for cid in child_ids:
                 child_existing = {
                     (int(c["from_qu_id"]), int(c["to_qu_id"]))
@@ -686,6 +684,7 @@ RULES:
                     and c["product_id"] != ""
                     and int(c["product_id"]) == cid
                 }
+                propagated = 0
                 for pc in parent_density:
                     pair = (int(pc["from_qu_id"]), int(pc["to_qu_id"]))
                     if pair in child_existing:
@@ -698,12 +697,16 @@ RULES:
                             "product_id": cid,
                         })
                         created += 1
+                        propagated += 1
                     except Exception:
                         pass  # likely already exists
-                child_name = products_by_id.get(cid, {}).get("name", str(cid))
-                log.info("Propagated density conversions to child product %d (%s).", cid, child_name)
+                if propagated:
+                    child_name = products_by_id.get(cid, {}).get("name", str(cid))
+                    log.info("Propagated %d density conversion(s) to child product %d (%s).",
+                             propagated, cid, child_name)
 
-        log.info("Density conversions: %d conversion(s) created.", created)
+    if created:
+        log.info("Density conversions: %d conversion(s) created total.", created)
 
 
 def _convert_recipe_to_stock(
