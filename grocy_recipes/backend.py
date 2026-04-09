@@ -1196,6 +1196,15 @@ def _get_recipe_detail(recipe_id: int) -> dict:
     # Get all conversions for stock comparison
     all_conversions = _grocy_get("objects/quantity_unit_conversions")
 
+    # Build parent→children map for stock aggregation.
+    # Grocy stock lives on child products, but recipe positions reference
+    # the parent product.  We must aggregate child stock for parents.
+    children_of: dict[int, list[int]] = {}
+    for p in products_list:
+        ppid = p.get("parent_product_id")
+        if ppid:
+            children_of.setdefault(int(ppid), []).append(p["id"])
+
     ingredients = []
     for pos in positions:
         pid = pos.get("product_id")
@@ -1211,13 +1220,44 @@ def _get_recipe_detail(recipe_id: int) -> dict:
             in_stock_pieces = stock_entry.get("amount", 0)
             amount_opened = stock_entry.get("amount_opened", 0)
 
+        # If this product is a parent with no direct stock, aggregate from
+        # children.  Grocy stores stock on child products but recipes
+        # reference parent products.
+        child_stock_converted = None
+        if in_stock_pieces == 0 and pid in children_of:
+            for cid in children_of[pid]:
+                cstock = stock_by_product.get(cid)
+                if not cstock or cstock.get("amount", 0) == 0:
+                    continue
+                child_amount = cstock.get("amount", 0)
+                child_product = products_by_id.get(cid, {})
+                child_stock_qu = child_product.get("qu_id_stock")
+                amount_opened += cstock.get("amount_opened", 0)
+                # Convert child stock to recipe units via child's conversions
+                if recipe_qu_id and child_stock_qu:
+                    converted = _convert_recipe_to_stock(
+                        child_amount, child_stock_qu, cid, recipe_qu_id,
+                        all_conversions,
+                    )
+                    if converted is not None:
+                        child_stock_converted = (child_stock_converted or 0) + converted
+                        continue
+                # Fallback: count raw pieces
+                in_stock_pieces += child_amount
+
         # Resolve unit display name from QU
         qu = qu_by_id.get(recipe_qu_id, {})
         unit_abbrev = qu.get("description", "") or ""
         stock_qu_id = product.get("qu_id_stock")
 
         # Determine status using unit conversions
-        if recipe_qu_id and stock_qu_id and recipe_qu_id != stock_qu_id:
+        if child_stock_converted is not None:
+            # Child stock was already converted to recipe units above
+            if child_stock_converted >= needed:
+                status = "green"
+            else:
+                status = "red"
+        elif recipe_qu_id and stock_qu_id and recipe_qu_id != stock_qu_id:
             # Convert stock (pieces) to recipe units for comparison
             stock_in_recipe_units = _convert_recipe_to_stock(
                 in_stock_pieces, stock_qu_id, pid, recipe_qu_id, all_conversions
