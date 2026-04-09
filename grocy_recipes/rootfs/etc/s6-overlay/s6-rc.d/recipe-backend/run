@@ -3,8 +3,17 @@
 bashio::log.info "Starting recipe backend on port 8100..."
 
 STORAGE_URL=$(bashio::config 'storage_url')
-GEMINI_API_KEY=$(bashio::config 'gemini_api_key')
-GEMINI_MODEL=$(bashio::config 'gemini_model')
+
+# AI key/model are optional local overrides — backend fetches from Storage if unset
+GEMINI_API_KEY=""
+if bashio::config.has_value 'gemini_api_key'; then
+    GEMINI_API_KEY=$(bashio::config 'gemini_api_key')
+fi
+
+GEMINI_MODEL=""
+if bashio::config.has_value 'gemini_model'; then
+    GEMINI_MODEL=$(bashio::config 'gemini_model')
+fi
 
 DEBUG="false"
 if bashio::config.true 'debug'; then

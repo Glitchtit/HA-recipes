@@ -39,10 +39,66 @@ log = logging.getLogger("recipe-backend")
 # Configuration (from environment, set by s6-overlay run script)
 # ---------------------------------------------------------------------------
 STORAGE_URL = os.environ.get("STORAGE_URL", "").rstrip("/")
-GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+# Local config values — used as overrides if set, otherwise fetched from Storage
+_LOCAL_GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
+_LOCAL_GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "")
+
+GEMINI_KEY: str = _LOCAL_GEMINI_KEY
+GEMINI_MODEL: str = _LOCAL_GEMINI_MODEL or "gemini-2.0-flash"
 
 PORT = 8100
+
+# ---------------------------------------------------------------------------
+# Fetch AI key from Storage (centralised key management)
+# ---------------------------------------------------------------------------
+_AI_KEY_MAX_RETRIES = 30
+_AI_KEY_RETRY_INTERVAL = 5  # seconds
+
+
+def _fetch_ai_key_from_storage() -> None:
+    """Fetch Gemini API key/model from Storage's ``/api/config/ai-key``.
+
+    Retries up to *_AI_KEY_MAX_RETRIES* times with *_AI_KEY_RETRY_INTERVAL* s
+    between attempts.  If local config already provides a key, this is a no-op.
+    """
+    global GEMINI_KEY, GEMINI_MODEL
+
+    if _LOCAL_GEMINI_KEY:
+        log.info("Using locally configured Gemini API key (override)")
+        return
+
+    if not STORAGE_URL:
+        log.warning("STORAGE_URL not set — cannot fetch AI key from Storage")
+        return
+
+    url = f"{STORAGE_URL}/api/config/ai-key"
+    for attempt in range(1, _AI_KEY_MAX_RETRIES + 1):
+        try:
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            data = r.json()
+            key = data.get("api_key", "")
+            model = data.get("model", "")
+            if key:
+                GEMINI_KEY = key
+                if model:
+                    GEMINI_MODEL = model
+                log.info(
+                    "Fetched AI key from Storage (model=%s, attempt %d)",
+                    GEMINI_MODEL, attempt,
+                )
+                return
+            log.warning("Storage returned empty AI key (attempt %d/%d)", attempt, _AI_KEY_MAX_RETRIES)
+        except Exception as exc:
+            log.warning(
+                "Failed to fetch AI key from Storage (attempt %d/%d): %s",
+                attempt, _AI_KEY_MAX_RETRIES, exc,
+            )
+        if attempt < _AI_KEY_MAX_RETRIES:
+            time.sleep(_AI_KEY_RETRY_INTERVAL)
+
+    log.error("Could not fetch AI key from Storage after %d attempts", _AI_KEY_MAX_RETRIES)
+
 
 # ---------------------------------------------------------------------------
 # Gemini client
@@ -1725,6 +1781,8 @@ class _Handler(BaseHTTPRequestHandler):
 def main() -> None:
     log.info("Starting recipe backend on port %d (debug=%s)", PORT, _DEBUG)
     log.info("Storage URL: %s", STORAGE_URL)
+
+    _fetch_ai_key_from_storage()
     log.info("Gemini model: %s", GEMINI_MODEL)
 
     server = _ThreadingHTTPServer(("0.0.0.0", PORT), _Handler)

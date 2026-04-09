@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.1
+
+- Fetch Gemini AI key from Storage addon (`GET /api/config/ai-key`) instead of requiring local config
+- Local `gemini_api_key` and `gemini_model` are now optional overrides
+- Retry logic (up to 30 attempts, 5s apart) for Storage connectivity on startup
+
 ## 1.4.0
 
 - Replaced Grocy API with HA-Storage API
