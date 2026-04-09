@@ -13,11 +13,9 @@ fi
 export NGINX_LOG_ROUTINE
 
 # Read options from Home Assistant config
-GROCY_BASE_URL=$(bashio::config 'grocy_base_url')
-GROCY_API_KEY=$(bashio::config 'grocy_api_key')
+STORAGE_URL=$(bashio::config 'storage_url')
 
-export GROCY_BASE_URL
-export GROCY_API_KEY
+export STORAGE_URL
 
 # ── Grocy Scraper auto-detect ─────────────────────────────────────────────
 SCRAPER_URL=""
@@ -108,10 +106,10 @@ fi
 
 export SCRAPER_URL
 
-bashio::log.info "Grocy URL: ${GROCY_BASE_URL}"
+bashio::log.info "Storage URL: ${STORAGE_URL}"
 bashio::log.info "Generating nginx configuration..."
 
-envsubst '${GROCY_BASE_URL} ${GROCY_API_KEY} ${SCRAPER_URL} ${NGINX_LOG_ROUTINE}' \
+envsubst '${STORAGE_URL} ${SCRAPER_URL} ${NGINX_LOG_ROUTINE}' \
   < /etc/nginx/nginx.conf.template \
   > /etc/nginx/nginx.conf
 

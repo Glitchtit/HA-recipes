@@ -2,8 +2,7 @@
 
 bashio::log.info "Starting recipe backend on port 8100..."
 
-GROCY_BASE_URL=$(bashio::config 'grocy_base_url')
-GROCY_API_KEY=$(bashio::config 'grocy_api_key')
+STORAGE_URL=$(bashio::config 'storage_url')
 GEMINI_API_KEY=$(bashio::config 'gemini_api_key')
 GEMINI_MODEL=$(bashio::config 'gemini_model')
 
@@ -12,6 +11,6 @@ if bashio::config.true 'debug'; then
     DEBUG="true"
 fi
 
-export GROCY_BASE_URL GROCY_API_KEY GEMINI_API_KEY GEMINI_MODEL DEBUG
+export STORAGE_URL GEMINI_API_KEY GEMINI_MODEL DEBUG
 
 exec python3 /app/backend.py

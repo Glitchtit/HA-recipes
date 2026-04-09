@@ -7,7 +7,6 @@ import axios from 'axios';
 const INGRESS_PATH =
   document.querySelector('meta[name="ingress-path"]')?.content ?? '';
 
-const API_GROCY = `${INGRESS_PATH}/api/grocy`;
 const API_BACKEND = `${INGRESS_PATH}/api/backend`;
 
 // ---------------------------------------------------------------------------
@@ -15,8 +14,7 @@ const API_BACKEND = `${INGRESS_PATH}/api/backend`;
 // ---------------------------------------------------------------------------
 function recipeImageUrl(filename) {
   if (!filename) return null;
-  const encoded = btoa(filename);
-  return `${INGRESS_PATH}/api/grocy-files/recipepictures/${encoded}?force_serve_as=picture&best_fit_width=400`;
+  return `${INGRESS_PATH}/api/storage-files/recipes/${encodeURIComponent(filename)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -47,7 +45,7 @@ function Toasts({ toasts }) {
 // RecipeCard — grid item for recipe list
 // ---------------------------------------------------------------------------
 function RecipeCard({ recipe, onClick }) {
-  const imgUrl = recipeImageUrl(recipe.picture_file_name);
+  const imgUrl = recipeImageUrl(recipe.picture_filename);
   return (
     <button
       onClick={onClick}
@@ -72,7 +70,7 @@ function RecipeCard({ recipe, onClick }) {
           {recipe.name}
         </h3>
         <p className="text-gray-400 text-xs mt-1">
-          {recipe.base_servings} annos{recipe.base_servings !== 1 ? 'ta' : ''}
+          {recipe.servings} annos{recipe.servings !== 1 ? 'ta' : ''}
         </p>
       </div>
     </button>
@@ -85,7 +83,7 @@ function RecipeCard({ recipe, onClick }) {
 function RecipeDetail({ recipe, onClose, onAddToShoppingList, onDelete }) {
   if (!recipe) return null;
 
-  const imgUrl = recipeImageUrl(recipe.picture_file_name);
+  const imgUrl = recipeImageUrl(recipe.picture_filename);
   const hasOpened = recipe.ingredients?.some(
     (i) => i.status === 'yellow',
   );
@@ -125,7 +123,7 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onDelete }) {
         <div className="px-6 pb-4">
           <h2 className="text-xl font-bold text-gray-100">{recipe.name}</h2>
           <p className="text-gray-400 mt-1 text-sm">
-            {recipe.base_servings} annos{recipe.base_servings !== 1 ? 'ta' : ''}
+            {recipe.servings} annos{recipe.servings !== 1 ? 'ta' : ''}
             {recipe.source_url && (
               <>
                 {' · '}

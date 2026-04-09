@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.0
+
+- Replaced Grocy API with HA-Storage API
+- Simplified recipe creation (single API call with ingredients)
+- Simplified unit handling (single unit_id per product)
+- Updated product field names
+- Updated nginx proxy configuration
+
 ## 1.3.6
 
 - Major performance improvement: recipe scraping reduced from ~3 min to ~45s
