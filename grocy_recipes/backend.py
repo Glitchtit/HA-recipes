@@ -384,6 +384,62 @@ RULES:
             log.warning("Failed to create conversion for product %d: %s", pid, exc)
 
 
+def _update_product_default_units(
+    matched_ingredients: list[dict], products_by_id: dict[int, dict]
+) -> None:
+    """Update product default QUs to match recipe units when no conversion exists.
+
+    For products where the recipe uses a measurable unit (g, dl, etc.) but the
+    product's stock QU is still the generic Piece and no product-specific
+    conversion was created by AI, change the product's default units to the
+    recipe unit.  E.g. "Turskafile" stock QU → grams.
+    """
+    umap = _get_unit_map()
+    if not umap:
+        return
+
+    existing_conversions = _grocy_get("objects/quantity_unit_conversions")
+    products_with_conv: set[int] = set()
+    for c in existing_conversions:
+        cpid = c.get("product_id")
+        if cpid is not None and cpid != "":
+            products_with_conv.add(int(cpid))
+
+    updated: set[int] = set()
+    for ing in matched_ingredients:
+        pid = ing.get("_product_id")
+        recipe_unit = _canonical_abbrev(ing.get("unit"))
+        if pid is None or recipe_unit is None or recipe_unit == "kpl":
+            continue
+        pid = int(pid)
+        if pid in updated or pid in products_with_conv:
+            continue
+
+        recipe_qu_id = umap.get(recipe_unit)
+        if recipe_qu_id is None:
+            continue
+
+        prod = products_by_id.get(pid, {})
+        stock_qu_id = prod.get("qu_id_stock")
+        if stock_qu_id == recipe_qu_id:
+            continue
+
+        try:
+            _grocy_put(f"objects/products/{pid}", {
+                "qu_id_stock": recipe_qu_id,
+                "qu_id_purchase": recipe_qu_id,
+                "qu_id_consume": recipe_qu_id,
+                "qu_id_price": recipe_qu_id,
+            })
+            updated.add(pid)
+            log.debug(
+                "Updated product %d (%s) default unit to %s",
+                pid, prod.get("name", ""), recipe_unit,
+            )
+        except Exception as exc:
+            log.warning("Failed to update product %d default unit: %s", pid, exc)
+
+
 def _convert_recipe_to_stock(
     recipe_amount: float,
     recipe_qu_id: int,
@@ -1178,6 +1234,12 @@ def _handle_scrape(url: str) -> dict:
         _create_product_conversions(recipe_data["ingredients"], products_by_id)
     except Exception as exc:
         log.warning("Failed to create product conversions: %s", exc)
+
+    # 7b. Update product default units for products without conversions
+    try:
+        _update_product_default_units(recipe_data["ingredients"], products_by_id)
+    except Exception as exc:
+        log.warning("Failed to update product default units: %s", exc)
 
     # 8. Create recipe in Grocy
     result = _create_recipe_in_grocy(recipe_data, recipe_data["ingredients"])

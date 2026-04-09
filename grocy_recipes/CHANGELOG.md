@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.2
+
+- Fix recipe ingredient creation failing with "Provided qu_id doesn't have a related conversion for that product"
+- For products without a detectable package size (e.g. "Turskafile"), automatically update the product's default unit to the recipe unit (e.g. grams) instead of leaving it as Piece
+- Products WITH detectable sizes (e.g. "Maito 1L") still use Piece as stock unit with AI-created conversions
+
 ## 1.3.1
 
 - Wire up debug toggle: set `debug: true` in add-on config to enable verbose logging
