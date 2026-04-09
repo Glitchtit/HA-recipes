@@ -1,6 +1,6 @@
 {
   "name": "Grocy Recipes",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "slug": "grocy_recipes",
   "description": "AI-powered recipe scraper for Grocy with smart shopping lists",
   "url": "https://github.com/Glitchtit/HA-grocy-recipes",

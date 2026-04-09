@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.4
+
+- Self-healing density conversions: when a recipe uses a unit in a different domain (e.g., dl) than the matched product (e.g., kg), automatically create weight↔volume conversions via Gemini AI density estimation
+- New `_ensure_density_conversions()` runs after product conversion setup during recipe scraping
+- Adds `_derive_density_conversions()` to generate all weight↔volume pairs from a single primary density
+
 ## 1.3.3
 
 - Fix "kananmuna" (egg) QU constraint error: count/piece units (kpl, st, pcs) now use the product's stock QU directly instead of resolving to a separate Kappale unit

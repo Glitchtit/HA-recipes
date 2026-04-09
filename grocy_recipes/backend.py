@@ -164,6 +164,14 @@ _UNIT_ALIASES: dict[str, str] = {
     "kpl": "kpl", "kappale": "kpl", "pcs": "kpl", "piece": "kpl", "st": "kpl",
 }
 
+# Unit domain sets for cross-domain detection
+_WEIGHT_UNITS = {"g", "kg"}
+_VOLUME_UNITS = {"ml", "dl", "l", "tl", "rkl"}
+
+# Normalisation factors (relative to base: kg for weight, l for volume)
+_WEIGHT_FACTORS = {"kg": 1.0, "g": 1000.0}  # 1 kg = 1000 g
+_VOLUME_FACTORS = {"l": 1.0, "dl": 10.0, "ml": 1000.0}  # 1 l = 10 dl = 1000 ml
+
 # Cache: abbreviation → Grocy QU ID
 _unit_map: dict[str, int] | None = None
 _unit_map_lock = threading.Lock()
@@ -269,6 +277,33 @@ def _canonical_abbrev(unit_str: str | None) -> str | None:
     if not unit_str:
         return None
     return _UNIT_ALIASES.get(unit_str.lower().strip())
+
+
+def _derive_density_conversions(
+    from_unit: str, to_unit: str, factor: float,
+) -> list[tuple[str, str, float]]:
+    """Compute all cross-domain weight↔volume pairs from one primary density conversion.
+
+    Given e.g. ``("kg", "l", 1.67)`` → produces pairs like
+    ``("kg", "dl", 16.7)``, ``("g", "l", 0.00167)``, etc.
+    Excludes the primary pair itself.
+    """
+    if from_unit in _WEIGHT_FACTORS and to_unit in _VOLUME_FACTORS:
+        kg_to_l = factor * _WEIGHT_FACTORS[from_unit] / _VOLUME_FACTORS[to_unit]
+    elif from_unit in _VOLUME_FACTORS and to_unit in _WEIGHT_FACTORS:
+        kg_to_l = _VOLUME_FACTORS[from_unit] / (factor * _WEIGHT_FACTORS[to_unit])
+    else:
+        return []
+
+    derived: list[tuple[str, str, float]] = []
+    for w, w_f in _WEIGHT_FACTORS.items():
+        for v, v_f in _VOLUME_FACTORS.items():
+            if w == from_unit and v == to_unit:
+                continue  # skip the primary pair
+            d_factor = round(kg_to_l * v_f / w_f, 6)
+            if d_factor > 0:
+                derived.append((w, v, d_factor))
+    return derived
 
 
 def _create_product_conversions(
@@ -447,7 +482,175 @@ def _update_product_default_units(
             log.warning("Failed to update product %d default unit: %s", pid, exc)
 
 
-def _convert_recipe_to_stock(
+def _ensure_density_conversions(
+    matched_ingredients: list[dict], products_by_id: dict[int, dict]
+) -> None:
+    """Create cross-domain (weight↔volume) density conversions for products.
+
+    For each ingredient whose recipe unit is in a different domain (weight vs
+    volume) than the product's existing conversions, use Gemini AI to estimate
+    the density and create product-specific conversions.
+    """
+    umap = _get_unit_map()
+    if not umap:
+        return
+
+    existing_conversions = _grocy_get("objects/quantity_unit_conversions")
+    id_to_abbrev: dict[int, str] = {v: k for k, v in umap.items()}
+
+    # Build per-product conversion unit sets
+    product_conv_units: dict[int, set[str]] = {}
+    for c in existing_conversions:
+        cpid = c.get("product_id")
+        if cpid is None or cpid == "":
+            continue
+        pid = int(cpid)
+        for qu_field in ("from_qu_id", "to_qu_id"):
+            abbrev = id_to_abbrev.get(int(c[qu_field]))
+            if abbrev:
+                product_conv_units.setdefault(pid, set()).add(abbrev)
+
+    need_density: list[dict] = []
+    seen_pids: set[int] = set()
+
+    for ing in matched_ingredients:
+        pid = ing.get("_product_id")
+        recipe_unit = _canonical_abbrev(ing.get("unit"))
+        if pid is None or recipe_unit is None or recipe_unit == "kpl":
+            continue
+        pid = int(pid)
+        if pid in seen_pids:
+            continue
+
+        # Determine recipe domain
+        if recipe_unit in _WEIGHT_UNITS:
+            recipe_domain = "weight"
+        elif recipe_unit in _VOLUME_UNITS:
+            recipe_domain = "volume"
+        else:
+            continue
+
+        # Check product's existing conversion domains
+        prod_units = product_conv_units.get(pid, set())
+        has_weight = bool(prod_units & _WEIGHT_UNITS)
+        has_volume = bool(prod_units & _VOLUME_UNITS)
+
+        # Already has cross-domain conversions — nothing to do
+        if has_weight and has_volume:
+            continue
+
+        # Recipe needs a domain the product doesn't have
+        if recipe_domain == "weight" and not has_weight and has_volume:
+            pass  # product has volume, recipe wants weight → need density
+        elif recipe_domain == "volume" and not has_volume and has_weight:
+            pass  # product has weight, recipe wants volume → need density
+        elif not has_weight and not has_volume:
+            # No product-specific conversions at all — check stock unit domain
+            prod = products_by_id.get(pid, {})
+            stock_abbrev = id_to_abbrev.get(prod.get("qu_id_stock"))
+            if stock_abbrev in _WEIGHT_UNITS and recipe_domain == "volume":
+                pass  # stock is weight, recipe is volume
+            elif stock_abbrev in _VOLUME_UNITS and recipe_domain == "weight":
+                pass  # stock is volume, recipe is weight
+            else:
+                continue
+        else:
+            continue
+
+        prod = products_by_id.get(pid, {})
+        existing_domain = "weight" if (has_weight or id_to_abbrev.get(prod.get("qu_id_stock")) in _WEIGHT_UNITS) else "volume"
+        need_density.append({
+            "product_id": pid,
+            "name": prod.get("name", ""),
+            "has_domain": existing_domain,
+        })
+        seen_pids.add(pid)
+
+    if not need_density:
+        return
+
+    product_list = json.dumps(need_density, ensure_ascii=False)
+
+    prompt = f"""For each Finnish grocery product below, estimate the density conversion
+between weight and volume units. Products already have a size in one domain
+(weight or volume) — provide the conversion to the OTHER domain.
+
+Products:
+{product_list}
+
+Return a JSON array:
+[{{"product_id": <id>, "from_unit": "kg"|"g"|"l"|"dl"|"ml", "to_unit": "kg"|"g"|"l"|"dl"|"ml", "factor": <number>}}]
+
+RULES:
+- For products with weight, provide a volume equivalent (e.g. 1 kg flour → factor: 1.67, from_unit: "kg", to_unit: "l")
+- For products with volume, provide a weight equivalent (e.g. 1 l milk → factor: 1.03, from_unit: "l", to_unit: "kg")
+- Use common grocery densities:
+  - Milk/cream/juice: ~1.03 kg/l
+  - Flour (vehnäjauho): ~0.6 kg/l (1 kg ≈ 1.67 l)
+  - Sugar (sokeri): ~0.85 kg/l
+  - Rice (riisi): ~0.85 kg/l
+  - Oil (öljy): ~0.92 kg/l
+  - Butter (voi): ~0.91 kg/l
+  - Honey (hunaja): ~1.4 kg/l
+  - Salt (suola): ~1.2 kg/l
+- If you cannot reasonably estimate the density, return null for factor
+- Use the SIMPLEST conversion (prefer kg↔l over g↔ml)"""
+
+    result = _call_gemini_json(prompt)
+    if not result or not isinstance(result, list):
+        log.warning("Gemini failed to estimate density conversions")
+        return
+
+    created = 0
+    for item in result:
+        pid = item.get("product_id")
+        factor = item.get("factor")
+        from_unit = item.get("from_unit")
+        to_unit = item.get("to_unit")
+        if pid is None or factor is None or from_unit is None or to_unit is None:
+            continue
+
+        from_id = umap.get(from_unit)
+        to_id = umap.get(to_unit)
+        if from_id is None or to_id is None:
+            continue
+
+        try:
+            _grocy_post("objects/quantity_unit_conversions", {
+                "from_qu_id": from_id,
+                "to_qu_id": to_id,
+                "factor": float(factor),
+                "product_id": int(pid),
+            })
+            log.info(
+                "Created density conversion for product %d (%s): 1 %s = %s %s",
+                pid, products_by_id.get(pid, {}).get("name", ""), from_unit, factor, to_unit,
+            )
+            created += 1
+        except Exception as exc:
+            log.warning("Failed to create density conversion for product %d: %s", pid, exc)
+            continue
+
+        # Create derived cross-domain conversions
+        derived = _derive_density_conversions(from_unit, to_unit, float(factor))
+        for d_from, d_to, d_factor in derived:
+            d_from_id = umap.get(d_from)
+            d_to_id = umap.get(d_to)
+            if d_from_id is None or d_to_id is None:
+                continue
+            try:
+                _grocy_post("objects/quantity_unit_conversions", {
+                    "from_qu_id": d_from_id,
+                    "to_qu_id": d_to_id,
+                    "factor": d_factor,
+                    "product_id": int(pid),
+                })
+                created += 1
+            except Exception:
+                pass  # likely already exists
+
+    if created:
+        log.info("Density conversions: %d conversion(s) created.", created)
     recipe_amount: float,
     recipe_qu_id: int,
     product_id: int,
@@ -1247,6 +1450,15 @@ def _handle_scrape(url: str) -> dict:
         _update_product_default_units(recipe_data["ingredients"], products_by_id)
     except Exception as exc:
         log.warning("Failed to update product default units: %s", exc)
+
+    # 7c. Create cross-domain density conversions (weight↔volume)
+    # Refresh products_by_id to include any default-unit changes from 7b
+    products = _get_all_products()
+    products_by_id = {p["id"]: p for p in products}
+    try:
+        _ensure_density_conversions(recipe_data["ingredients"], products_by_id)
+    except Exception as exc:
+        log.warning("Failed to create density conversions: %s", exc)
 
     # 8. Create recipe in Grocy
     result = _create_recipe_in_grocy(recipe_data, recipe_data["ingredients"])
