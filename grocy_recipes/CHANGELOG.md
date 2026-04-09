@@ -1,7 +1,8 @@
 # Changelog
 
-## 1.3.4
+## 1.3.5
 
+- Propagate density conversions from parent products to all child products (Grocy does not inherit product-specific conversions)
 - Self-healing density conversions: when a recipe uses a unit in a different domain (e.g., dl) than the matched product (e.g., kg), automatically create weight↔volume conversions via Gemini AI density estimation
 - New `_ensure_density_conversions()` runs after product conversion setup during recipe scraping
 - Adds `_derive_density_conversions()` to generate all weight↔volume pairs from a single primary density
