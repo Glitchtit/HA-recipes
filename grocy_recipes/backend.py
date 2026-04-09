@@ -651,6 +651,9 @@ RULES:
 
     if created:
         log.info("Density conversions: %d conversion(s) created.", created)
+
+
+def _convert_recipe_to_stock(
     recipe_amount: float,
     recipe_qu_id: int,
     product_id: int,
