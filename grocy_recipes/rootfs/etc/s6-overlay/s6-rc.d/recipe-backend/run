@@ -7,6 +7,11 @@ GROCY_API_KEY=$(bashio::config 'grocy_api_key')
 GEMINI_API_KEY=$(bashio::config 'gemini_api_key')
 GEMINI_MODEL=$(bashio::config 'gemini_model')
 
-export GROCY_BASE_URL GROCY_API_KEY GEMINI_API_KEY GEMINI_MODEL
+DEBUG="false"
+if bashio::config.true 'debug'; then
+    DEBUG="true"
+fi
+
+export GROCY_BASE_URL GROCY_API_KEY GEMINI_API_KEY GEMINI_MODEL DEBUG
 
 exec python3 /app/backend.py

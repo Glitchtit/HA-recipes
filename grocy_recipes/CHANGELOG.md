@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.1
+
+- Wire up debug toggle: set `debug: true` in add-on config to enable verbose logging
+- Suppress routine HTTP request logs (config/recipes polling) in normal mode — only important events shown
+- Suppress nginx access logs for routine polling endpoints in normal mode
+- Backend startup now logs debug mode status
+
 ## 1.3.0
 
 - Automated unit handling: auto-create standard recipe units in Grocy (g, kg, dl, l, ml, tl, rkl, rs, kpl) and global conversions (1 l = 10 dl, 1 kg = 1000 g, etc.)

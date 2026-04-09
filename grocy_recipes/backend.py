@@ -26,8 +26,10 @@ from google import genai
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
+_DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG if _DEBUG else logging.INFO,
     format="%(asctime)s %(levelname)s: %(message)s",
     datefmt="%H:%M:%S",
 )
@@ -196,7 +198,7 @@ def _ensure_units_and_conversions() -> dict[str, int]:
                 try:
                     resp = _grocy_post("objects/quantity_units", unit_def)
                     uid = int(resp.get("created_object_id", 0))
-                    log.info("Created QU '%s' (ID %d)", unit_def["name"], uid)
+                    log.debug("Created QU '%s' (ID %d)", unit_def["name"], uid)
                 except Exception as exc:
                     log.warning("Failed to create QU '%s': %s", unit_def["name"], exc)
                     continue
@@ -228,12 +230,12 @@ def _ensure_units_and_conversions() -> dict[str, int]:
                     "to_qu_id": to_id,
                     "factor": factor,
                 })
-                log.info("Created global conversion: 1 %s = %s %s", from_abbrev, factor, to_abbrev)
+                log.debug("Created global conversion: 1 %s = %s %s", from_abbrev, factor, to_abbrev)
             except Exception as exc:
                 log.warning("Failed to create conversion %s→%s: %s", from_abbrev, to_abbrev, exc)
 
         _unit_map = abbrev_to_id
-        log.info("Unit map initialised: %s", {k: v for k, v in abbrev_to_id.items()})
+        log.debug("Unit map initialised: %s", {k: v for k, v in abbrev_to_id.items()})
         return _unit_map
 
 
@@ -374,7 +376,7 @@ RULES:
                 "factor": float(amount),
                 "product_id": int(pid),
             })
-            log.info(
+            log.debug(
                 "Created conversion for product %d: 1 piece = %s %s",
                 pid, amount, unit_abbrev,
             )
@@ -467,7 +469,7 @@ def _scraper_discover(product_name: str) -> dict | None:
     """
     # Translate to a Finnish grocery search term
     search_term = _translate_to_finnish_search(product_name)
-    log.info("Scraper search: '%s' → Finnish search term: '%s'", product_name, search_term)
+    log.debug("Scraper search: '%s' → Finnish search term: '%s'", product_name, search_term)
 
     try:
         r = requests.post(
@@ -492,7 +494,7 @@ def _scraper_discover(product_name: str) -> dict | None:
             return None
         data = r.json()
         if data.get("success") and data.get("added", 0) > 0:
-            log.info("Scraper created product for '%s'", product_name)
+            log.debug("Scraper created product for '%s'", product_name)
             return data
         return None
     except Exception as exc:
@@ -772,7 +774,7 @@ def _create_recipe_in_grocy(recipe_data: dict, matched_ingredients: list[dict]) 
         filename = _upload_recipe_image(recipe_id, recipe_data["image_url"])
         if filename:
             _grocy_put(f"objects/recipes/{recipe_id}", {"picture_file_name": filename})
-            log.info("Uploaded recipe image: %s", filename)
+            log.debug("Uploaded recipe image: %s", filename)
 
     # Create ingredient positions
     all_products = {p["id"]: p for p in _grocy_get("objects/products")}
@@ -1054,7 +1056,7 @@ def _handle_scrape(url: str) -> dict:
 
     # 1. Scrape the recipe
     recipe_data = _scrape_recipe(url)
-    log.info(
+    log.debug(
         "Extracted recipe: '%s' with %d ingredients",
         recipe_data.get("name"),
         len(recipe_data.get("ingredients", [])),
@@ -1068,7 +1070,7 @@ def _handle_scrape(url: str) -> dict:
         match = _match_ingredient(ing["name"], products)
         if match:
             ing["_product_id"] = match["id"]
-            log.info("Matched '%s' → '%s' (ID %d)", ing["name"], match["name"], match["id"])
+            log.debug("Matched '%s' → '%s' (ID %d)", ing["name"], match["name"], match["id"])
         else:
             ing["_product_id"] = None
 
@@ -1099,7 +1101,7 @@ def _handle_scrape(url: str) -> dict:
                 match = _match_ingredient(ing["name"], products)
                 if match:
                     ing["_product_id"] = match["id"]
-                    log.info(
+                    log.debug(
                         "Discovered and matched '%s' → '%s' (ID %d)",
                         ing["name"], match["name"], match["id"],
                     )
@@ -1163,7 +1165,7 @@ def _handle_scrape(url: str) -> dict:
                     new_id = resp.get("created_object_id")
                     if new_id:
                         ing["_product_id"] = int(new_id)
-                        log.info(
+                        log.debug(
                             "Created stub product '%s' (ID %s)", stub_name, new_id,
                         )
                 except Exception as exc:
@@ -1193,8 +1195,15 @@ class _ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 
 
 class _Handler(BaseHTTPRequestHandler):
+    _QUIET_PATHS = frozenset(("/api/config", "api/config", "/api/recipes"))
+
     def log_message(self, fmt: str, *args: Any) -> None:
-        log.info(fmt, *args)
+        msg = fmt % args if args else fmt
+        path = self.path.split("?")[0].rstrip("/") if hasattr(self, "path") else ""
+        if path in self._QUIET_PATHS:
+            log.debug(msg)
+        else:
+            log.info(msg)
 
     def handle(self) -> None:
         try:
@@ -1298,7 +1307,7 @@ class _Handler(BaseHTTPRequestHandler):
 # Main
 # ---------------------------------------------------------------------------
 def main() -> None:
-    log.info("Starting recipe backend on port %d", PORT)
+    log.info("Starting recipe backend on port %d (debug=%s)", PORT, _DEBUG)
     log.info("Grocy URL: %s", GROCY_URL)
     log.info("Gemini model: %s", GEMINI_MODEL)
 

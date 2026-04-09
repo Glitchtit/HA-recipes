@@ -21,6 +21,7 @@ http {
     map $request_uri $is_routine {
         default                                                            0;
         ~^/api/grocy/(stock|objects/(locations|product_groups|userfields))  1;
+        ~^/api/backend/(config|recipes)(\?|$)                              1;
         ~\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)(\?|$)     1;
     }
 
