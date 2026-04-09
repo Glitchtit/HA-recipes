@@ -649,7 +649,60 @@ RULES:
             except Exception:
                 pass  # likely already exists
 
+    # Propagate density conversions from parent products to their children.
+    # Grocy does NOT inherit conversions from parent products, so each child
+    # needs its own copy for Grocy to resolve recipe units against stock.
     if created:
+        # Refresh conversions after creation
+        all_convs = _grocy_get("objects/quantity_unit_conversions")
+        # Build parent→children map
+        children_of: dict[int, list[int]] = {}
+        for p in products_by_id.values():
+            ppid = p.get("parent_product_id")
+            if ppid:
+                children_of.setdefault(int(ppid), []).append(p["id"])
+
+        for pid in seen_pids:
+            child_ids = children_of.get(pid, [])
+            if not child_ids:
+                continue
+            # Collect density conversions we just created for the parent
+            parent_density = [
+                c for c in all_convs
+                if c.get("product_id") is not None
+                and c["product_id"] != ""
+                and int(c["product_id"]) == pid
+                and id_to_abbrev.get(int(c["from_qu_id"])) in (_WEIGHT_UNITS | _VOLUME_UNITS)
+                and id_to_abbrev.get(int(c["to_qu_id"])) in (_WEIGHT_UNITS | _VOLUME_UNITS)
+            ]
+            if not parent_density:
+                continue
+            # Collect existing child conversion pairs to avoid duplicates
+            for cid in child_ids:
+                child_existing = {
+                    (int(c["from_qu_id"]), int(c["to_qu_id"]))
+                    for c in all_convs
+                    if c.get("product_id") is not None
+                    and c["product_id"] != ""
+                    and int(c["product_id"]) == cid
+                }
+                for pc in parent_density:
+                    pair = (int(pc["from_qu_id"]), int(pc["to_qu_id"]))
+                    if pair in child_existing:
+                        continue
+                    try:
+                        _grocy_post("objects/quantity_unit_conversions", {
+                            "from_qu_id": pair[0],
+                            "to_qu_id": pair[1],
+                            "factor": float(pc["factor"]),
+                            "product_id": cid,
+                        })
+                        created += 1
+                    except Exception:
+                        pass  # likely already exists
+                child_name = products_by_id.get(cid, {}).get("name", str(cid))
+                log.info("Propagated density conversions to child product %d (%s).", cid, child_name)
+
         log.info("Density conversions: %d conversion(s) created.", created)
 
 
