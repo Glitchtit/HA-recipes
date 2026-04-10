@@ -216,6 +216,90 @@ def _call_ai_json(prompt: str) -> dict | list | None:
     return _call_gemini_json(prompt)
 
 
+def _call_gemini_text(prompt: str) -> str | None:
+    """Call Gemini for a plain-text response (no JSON mode)."""
+    client = _get_gemini()
+    for attempt in range(1, _GEMINI_MAX_RETRIES + 1):
+        try:
+            resp = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config=genai.types.GenerateContentConfig(temperature=0.2),
+            )
+            usage = getattr(resp, "usage_metadata", None)
+            if usage:
+                log.info(
+                    "Gemini text usage — prompt tokens: %s, output tokens: %s, total: %s",
+                    getattr(usage, "prompt_token_count", "?"),
+                    getattr(usage, "candidates_token_count", "?"),
+                    getattr(usage, "total_token_count", "?"),
+                )
+            return resp.text or ""
+        except Exception as exc:
+            exc_str = str(exc)
+            log.warning("Gemini text attempt %d/%d failed: %s", attempt, _GEMINI_MAX_RETRIES, exc)
+            if attempt < _GEMINI_MAX_RETRIES:
+                if "DEADLINE_EXCEEDED" in exc_str or "504" in exc_str:
+                    time.sleep(30)
+                else:
+                    time.sleep(2 ** attempt)
+    return None
+
+
+def _call_claude_text(prompt: str) -> str | None:
+    """Call Claude API for a plain-text response."""
+    try:
+        import anthropic as _anthropic
+    except ImportError:
+        log.error("anthropic package not installed; cannot call Claude")
+        return None
+    client = _anthropic.Anthropic(api_key=CLAUDE_API_KEY)
+    for attempt in range(1, _GEMINI_MAX_RETRIES + 1):
+        try:
+            response = client.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=4096,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return response.content[0].text or ""
+        except Exception as exc:
+            log.warning("Claude text attempt %d/%d failed: %s", attempt, _GEMINI_MAX_RETRIES, exc)
+            if attempt < _GEMINI_MAX_RETRIES:
+                time.sleep(2 ** attempt)
+    return None
+
+
+def _call_ollama_text(prompt: str) -> str | None:
+    """Call Ollama for a plain-text response."""
+    for attempt in range(1, _GEMINI_MAX_RETRIES + 1):
+        try:
+            resp = requests.post(
+                f"{OLLAMA_URL}/api/chat",
+                json={
+                    "model": OLLAMA_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "stream": False,
+                },
+                timeout=300,
+            )
+            resp.raise_for_status()
+            return resp.json()["message"]["content"]
+        except Exception as exc:
+            log.warning("Ollama text attempt %d/%d failed: %s", attempt, _GEMINI_MAX_RETRIES, exc)
+            if attempt < _GEMINI_MAX_RETRIES:
+                time.sleep(2 ** attempt)
+    return None
+
+
+def _call_ai_text(prompt: str) -> str | None:
+    """Route AI plain-text call to Gemini, Ollama, or Claude."""
+    if AI_PROVIDER == "ollama":
+        return _call_ollama_text(prompt)
+    if AI_PROVIDER == "claude":
+        return _call_claude_text(prompt)
+    return _call_gemini_text(prompt)
+
+
 # ---------------------------------------------------------------------------
 # Storage API helpers
 # ---------------------------------------------------------------------------
@@ -1133,27 +1217,154 @@ RULES:
 - Translate ALL ingredient names to Finnish (smör→voi, mjölk→maito, butter→voi, milk→maito, salt→suola, flour→vehnäjauho, egg→kananmuna, ägg→kananmuna, potato→peruna, lök→sipuli, vitlök→valkosipuli, etc.)
 - Name must be a simple generic product name (e.g. "kananmuna" not "3 kananmunaa")
 - Amount: extract the numeric quantity (float), or null if absent
+- PARENTHETICAL ANNOTATIONS: If a string contains a weight/calorie note in parentheses like "(ca 120 g)", "(about 180g)", "(500 kcal)" → IGNORE the parenthetical. Use only the primary amount/unit before it.
+  Example: "2 ägg (ca 120 g)" → amount=2, unit="kpl" NOT amount=120, unit="g"
+- "TO TASTE" ingredients: If the source says "to taste", "salta väl", "maun mukaan", "efter smak", "salt and pepper", "season with..." or similar → amount=null, unit=null
 - Unit rules (CRITICAL — follow exactly):
-  * If the source already has a unit (dl, ml, l, g, kg, tsk, msk, msk, tbsp, tsp, cup, etc.) → translate it to the Finnish abbreviation (dl, ml, l, g, kg, tl, rkl)
+  * If the source already has a unit (dl, ml, l, g, kg, tsk, msk, tbsp, tsp, cup, etc.) → translate it to the Finnish abbreviation (dl, ml, l, g, kg, tl, rkl)
   * If the source has NO unit and the ingredient is a whole countable item (egg/ägg/kananmuna, onion/lök/sipuli, potato/peruna, clove/vitlöksklyfta, carrot/morot/porkkana, etc.) → unit = "kpl"
   * If the source has NO unit and the ingredient is not a countable item (salt, pepper, oil, etc.) → unit = null
   * NEVER invent a weight unit (g/kg) when no unit is given in the source string
 - Note: preparation detail like "hienonnettu", "viipaloitu", or null
-- Examples: "2 ägg" → name="kananmuna", amount=2, unit="kpl" | "3 eggs" → name="kananmuna", amount=3, unit="kpl" | "1 lök" → name="sipuli", amount=1, unit="kpl"
+- Examples:
+  "2 ägg" → name="kananmuna", amount=2, unit="kpl"
+  "2 ägg (ca 120 g)" → name="kananmuna", amount=2, unit="kpl"
+  "3 eggs" → name="kananmuna", amount=3, unit="kpl"
+  "1 lök" → name="sipuli", amount=1, unit="kpl"
+  "salt" → name="suola", amount=null, unit=null
+  "salta väl" → name="suola", amount=null, unit=null
+  "peppar efter smak" → name="pippuri", amount=null, unit=null
 - Do NOT include any text outside the JSON array"""
 
     result = _call_ai_json(prompt)
     if not result or not isinstance(result, list):
         log.warning("Ingredient translation failed — returning empty list")
         return []
+    return _fix_countable_units(result)
+
+
+# Known countable ingredient keywords (Finnish) — never use g/kg for these
+_COUNTABLE_KEYWORDS = {
+    "kananmuna", "muna", "sipuli", "punasipuli", "kevätsipuli", "peruna", "porkkana",
+    "tomaatti", "paprika", "sitruuna", "lime", "appelsiini", "banaani", "avokado",
+    "valkosipuli", "kurkku", "selleri", "lanttu", "palsternakka", "nauris",
+}
+
+
+def _fix_countable_units(ingredients: list[dict]) -> list[dict]:
+    """Post-processor: force unit=kpl for countable items when AI returns g/kg with small count.
+
+    Prevents "2 kananmuna" being stored as "2 g kananmuna" which is nonsensical.
+    Only triggers when amount <= 24 (larger values are plausible weights).
+    """
+    for ing in ingredients:
+        if not isinstance(ing, dict):
+            continue
+        name = (ing.get("name") or "").lower()
+        unit = (ing.get("unit") or "").lower()
+        amount = ing.get("amount")
+        if unit in ("g", "kg") and amount is not None and float(amount) <= 24:
+            if any(kw in name for kw in _COUNTABLE_KEYWORDS):
+                log.info("_fix_countable_units: %s %s %s → kpl", amount, unit, name)
+                ing["unit"] = "kpl"
+    return ingredients
+
+
+def _summarize_recipe(page_text: str, url: str) -> str | None:
+    """Step 1 of two-step extraction: ask AI to summarize the recipe page as plain text.
+
+    The summary normalizes ingredient strings:
+    - Strips parenthetical weight/calorie annotations
+    - Marks 'to taste' ingredients explicitly
+    This produces cleaner input for the JSON extraction step.
+    """
+    prompt = f"""Summarize this recipe page into a clean, structured plain-text recipe.
+
+URL: {url}
+
+Page content:
+{page_text}
+
+Instructions:
+1. Write the recipe name on the first line.
+2. Write the number of servings (e.g. "Servings: 4").
+3. List ingredients, one per line, in this exact format:
+   <amount> <unit> <ingredient name>
+   Rules for ingredients:
+   - REMOVE any parenthetical weight or calorie notes: "2 ägg (ca 120 g)" → write "2 ägg"
+   - "To taste" / "salta väl" / "maun mukaan" / "efter smak" → write "to taste <ingredient name>"
+   - Keep amounts and units as written (do not convert or translate)
+4. List the cooking steps numbered 1, 2, 3...
+
+Write ONLY the clean recipe. No extra commentary, no markdown formatting."""
+
+    return _call_ai_text(prompt)
+
+
+def _extract_recipe_from_summary(summary: str, url: str, image_url: str | None) -> dict:
+    """Step 2 of two-step extraction: extract structured JSON from the clean summary text.
+
+    The summary has already been normalized (parenthetical weights removed,
+    to-taste items marked), so this step only needs to translate to Finnish and
+    produce the final JSON.
+    """
+    prompt = f"""Extract a structured recipe JSON from this summary text.
+
+Summary:
+{summary}
+
+Return a JSON object with exactly these fields:
+{{
+  "name": "Recipe name (in the original language of the recipe)",
+  "servings": <number of servings as integer>,
+  "ingredients": [
+    {{"name": "ingredient name ALWAYS IN FINNISH", "amount": <number or null>, "unit": "unit string or null", "note": "any note like 'chopped' or null"}}
+  ],
+  "instructions": ["Step 1 text", "Step 2 text", ...]
+}}
+
+CRITICAL LANGUAGE RULES:
+- ALWAYS translate ingredient names to Finnish, regardless of the source language.
+  Examples: "smör" → "voi", "butter" → "voi", "torskfilé" → "turskafile", "salt" → "suola",
+  "milk" → "maito", "ägg" → "kananmuna", "flour" → "vehnäjauho", "potatis" → "peruna",
+  "onion" → "sipuli", "garlic" → "valkosipuli", "carrot" → "porkkana"
+- Keep ingredient names as simple generic product names (e.g. "kananmuna" not "3 kananmunaa")
+- The recipe name and instructions should stay in the original language.
+
+"TO TASTE" RULE:
+- If a line in the summary starts with "to taste" (e.g. "to taste salt", "to taste pepper")
+  → set amount=null and unit=null for that ingredient
+  Example: "to taste salt" → {{"name": "suola", "amount": null, "unit": null}}
+
+UNIT RULES (CRITICAL):
+- If the source already has a unit (dl, ml, l, g, kg, tsk, msk, tbsp, tsp, cup) → translate to Finnish abbreviation (dl, ml, l, g, kg, tl, rkl)
+- If NO unit and ingredient is a whole countable item (egg/ägg/kananmuna, onion/sipuli, potato/peruna, carrot/porkkana, etc.) → unit = "kpl"
+- If NO unit and ingredient is not countable (salt, pepper, oil) → unit = null
+- NEVER invent a weight (g/kg) when no unit appears in the source line
+- Examples: "2 ägg" → unit="kpl" | "3 eggs" → unit="kpl" | "1 lök" → unit="kpl" | "salt" → unit=null
+
+- Do NOT include any text outside the JSON object"""
+
+    result = _call_ai_json(prompt)
+    if not result or not isinstance(result, dict):
+        raise ValueError("Failed to extract recipe JSON from summary")
+
+    if "ingredients" in result and isinstance(result["ingredients"], list):
+        result["ingredients"] = _fix_countable_units(result["ingredients"])
+
+    result["source_url"] = url
+    result["image_url"] = image_url
     return result
 
 
 def _scrape_recipe(url: str) -> dict:
-    """Scrape a recipe from URL using Gemini AI.
+    """Scrape a recipe from URL using AI.
 
-    Tries JSON-LD schema.org/Recipe extraction first (fast, no large Gemini call).
-    Falls back to sending page text to Gemini if no structured data is found.
+    Tries JSON-LD schema.org/Recipe extraction first (fast, no large AI call).
+    Falls back to a two-step approach: summarize the page first, then extract
+    structured JSON from the clean summary. This avoids problems where the raw
+    page includes parenthetical weight annotations (e.g. "2 ägg (ca 120 g)")
+    that confuse single-step extraction.
 
     Returns: {name, image_url, servings, source_url, ingredients: [{name, amount, unit, note}], instructions: [str]}
     """
@@ -1194,52 +1405,16 @@ def _scrape_recipe(url: str) -> dict:
             "image_url": image_url,
         }
 
-    # --- Fallback: send page text to Gemini ---------------------------------
-    log.info("No JSON-LD found for %s — using full-page Gemini extraction", url)
+    # --- Fallback: two-step summarize → extract ------------------------------
+    log.info("No JSON-LD found for %s — using two-step Gemini extraction", url)
     page_text = BeautifulSoup(raw_html, "html.parser").get_text(separator="\n", strip=True)[:8000]
 
-    prompt = f"""Analyze this recipe page and extract the recipe as structured JSON.
+    summary = _summarize_recipe(page_text, url)
+    if not summary:
+        raise ValueError("Failed to summarize recipe page")
 
-Page URL: {url}
+    return _extract_recipe_from_summary(summary, url, image_url)
 
-Page content:
-{page_text}
-
-Return a JSON object with exactly these fields:
-{{
-  "name": "Recipe name (in the original language of the recipe)",
-  "servings": <number of servings as integer>,
-  "ingredients": [
-    {{"name": "ingredient name ALWAYS IN FINNISH", "amount": <number or null>, "unit": "unit string or null", "note": "any note like 'chopped' or null"}}
-  ],
-  "instructions": ["Step 1 text", "Step 2 text", ...]
-}}
-
-CRITICAL LANGUAGE RULES:
-- The recipe may be in Swedish, English, Finnish, or any other language.
-- ALWAYS translate ingredient names to Finnish, regardless of the recipe language.
-  Examples: "smör" (Swedish) → "voi", "butter" (English) → "voi", "torskfilé" → "turskafile", "salt" → "suola", "milk" → "maito", "ägg" → "kananmuna", "flour" → "vehnäjauho", "potatis" → "peruna"
-- Keep ingredient names as simple generic product names (e.g. "kananmuna" not "3 kananmunaa", "voi" not "Valio voi 500g")
-- The recipe name and instructions should stay in the original language of the recipe.
-
-Other rules:
-- Amount should be a number (float), not a string
-- Unit rules (CRITICAL — follow exactly):
-  * If the source already has a unit (dl, ml, l, g, kg, tsk, msk, tbsp, tsp, cup, etc.) → translate it to standard Finnish abbreviation (dl, ml, l, g, kg, tl, rkl)
-  * If NO unit is given and the ingredient is a whole countable item (egg/ägg/kananmuna, onion/lök/sipuli, potato/peruna, carrot/morot/porkkana, clove/klyfta, etc.) → unit = "kpl"
-  * If NO unit is given and the ingredient is not countable (salt, pepper, oil, etc.) → unit = null
-  * NEVER invent a weight (g/kg) when no unit appears in the source
-  * Examples: "2 ägg" → unit="kpl" | "3 eggs" → unit="kpl" | "1 lök" → unit="kpl" | "salt" → unit=null
-- Instructions should be clear numbered steps
-- Do NOT include any text outside the JSON object"""
-
-    result = _call_ai_json(prompt)
-    if not result or not isinstance(result, dict):
-        raise ValueError("Failed to extract recipe from page")
-
-    result["source_url"] = url
-    result["image_url"] = image_url
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1452,7 +1627,7 @@ def _create_recipe(recipe_data: dict, matched_ingredients: list[dict]) -> dict:
 
         ingredients.append({
             "product_id": pid,
-            "amount": ing.get("amount") or 1,
+            "amount": ing.get("amount") if ing.get("amount") is not None else 0,
             "unit_id": recipe_unit_id,
             "note": " — ".join(note_parts) if note_parts else "",
             "sort_order": idx,
@@ -1535,7 +1710,7 @@ def _get_recipe_detail(recipe_id: int) -> dict:
         pid = pos.get("product_id")
         product = products_by_id.get(pid, {})
         product_name = pos.get("product_name") or product.get("name", f"Product #{pid}")
-        needed = pos.get("amount", 1)
+        needed = pos.get("amount") or 0
         recipe_unit_id = pos.get("unit_id")
 
         stock_entry = stock_by_product.get(pid)
@@ -1544,6 +1719,28 @@ def _get_recipe_detail(recipe_id: int) -> dict:
         if stock_entry:
             in_stock_pieces = stock_entry.get("amount", 0)
             amount_opened = stock_entry.get("amount_opened", 0)
+
+        # "To taste" ingredients: green if any in stock, yellow if none
+        if needed == 0:
+            if in_stock_pieces > 0 or any(
+                stock_by_product.get(cid, {}).get("amount", 0) > 0
+                for cid in children_of.get(pid, [])
+            ):
+                status = "green"
+            else:
+                status = "yellow"
+            ingredients.append({
+                "id": pos.get("id"),
+                "product_id": pid,
+                "product_name": product_name,
+                "parent_id": product.get("parent_id"),
+                "parent_name": None,
+                "amount_needed": 0,
+                "unit_abbrev": "",
+                "note": pos.get("note", ""),
+                "status": status,
+            })
+            continue
 
         # Aggregate child stock for parent products
         child_stock_converted = None

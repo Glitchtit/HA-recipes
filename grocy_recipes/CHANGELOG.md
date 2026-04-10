@@ -1,3 +1,10 @@
+## 1.5.16
+- Two-step recipe extraction: page is first summarized to strip parenthetical weight annotations (e.g. "2 ägg (ca 120 g)" → "2 ägg"), then structured JSON extracted from the clean summary — fixes "2 ägg → 2 g" bug
+- Strengthened `_translate_ingredients` prompt: ignores parenthetical weight/calorie notes; maps "to taste" / "salta väl" / "maun mukaan" to amount=null, unit=null
+- Post-processing safety net `_fix_countable_units()`: forces unit=kpl for known countable items (eggs, onions, potatoes, etc.) when AI returns g/kg with amount ≤ 24
+- "To taste" ingredients now stored with amount=0; stock check shows green if any amount in stock, yellow if none — no longer stored as "1 unit"
+- Frontend already hides amount/unit when amount_needed==0 — no display changes needed
+
 ## 1.5.15
 - Recipe ingredient matching now restricted to products in the "Group master" product group (including inactive stubs) — resolves matching to specific branded products and eliminates duplicate stub creation when re-scraping the same recipe
 
