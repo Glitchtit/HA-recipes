@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.9
+- Fix Claude JSON parsing: add `_extract_json_text()` helper to extract JSON from
+  markdown-fenced or prose-prefixed Claude responses; fixes "Expecting value" parse errors
+
 ## 1.5.8
 - Add Claude AI provider support: `claude_api_key` + `claude_model` in config.json, run script, backend.py globals, `_call_claude_json()`, and `_call_ai_json()` dispatcher
 

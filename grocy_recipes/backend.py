@@ -71,11 +71,24 @@ def wait_for_storage(base_url: str, max_retries: int = 30, delay: float = 5.0) -
 
 
 # ---------------------------------------------------------------------------
-# AI client (Gemini or Ollama)
+# AI client (Gemini, Ollama, Claude)
 # ---------------------------------------------------------------------------
 _gemini_client: genai.Client | None = None
 
 _GEMINI_MAX_RETRIES = 4
+
+
+def _extract_json_text(text: str) -> str:
+    """Extract the JSON portion from an AI response that may include prose or markdown fences."""
+    # Extract from code fence if present
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+    if fence:
+        return fence.group(1)
+    # Find the first JSON object or array
+    match = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", text)
+    if match:
+        return match.group(1)
+    return text.strip()
 
 
 def _get_gemini() -> genai.Client:
@@ -169,9 +182,9 @@ def _call_claude_json(prompt: str) -> dict | list | None:
         log.error("anthropic package not installed; cannot call Claude")
         return None
     _MAX_RETRIES = _GEMINI_MAX_RETRIES
+    client = _anthropic.Anthropic(api_key=CLAUDE_API_KEY)
     for attempt in range(1, _MAX_RETRIES + 1):
         try:
-            client = _anthropic.Anthropic(api_key=CLAUDE_API_KEY)
             response = client.messages.create(
                 model=CLAUDE_MODEL,
                 max_tokens=8192,
@@ -185,8 +198,7 @@ def _call_claude_json(prompt: str) -> dict | list | None:
             )
             text = response.content[0].text or ""
             text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
-            # Strip markdown code fences if present
-            text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
+            text = _extract_json_text(text)
             return json.loads(text)
         except Exception as exc:
             log.warning("Claude attempt %d/%d failed: %s", attempt, _MAX_RETRIES, exc)
