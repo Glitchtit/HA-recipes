@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.2
+
+- Fix recipe image duplication: filenames now include a random token to prevent collisions when recipe IDs are reused after factory reset
+- Delete recipe image file from Storage when a recipe is deleted
+- Log image URLs during upload for easier debugging
+
 ## 1.5.1
 
 - Fix API proxy: nginx static asset regex no longer intercepts /api/ image and file requests

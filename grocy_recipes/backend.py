@@ -13,6 +13,7 @@ import os
 import re
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
@@ -1179,9 +1180,10 @@ MATCHING RULES:
 # ---------------------------------------------------------------------------
 # Recipe CRUD in Grocy
 # ---------------------------------------------------------------------------
-def _upload_recipe_image(recipe_id: int, image_url: str) -> str | None:
+def _upload_recipe_image(recipe_id: int, image_url: str, old_filename: str | None = None) -> str | None:
     """Download image from URL and upload to Storage."""
     try:
+        log.debug("Downloading recipe image from: %s", image_url)
         r = requests.get(image_url, timeout=15, headers={
             "User-Agent": "Mozilla/5.0 (compatible; GrocyRecipes/1.0)"
         })
@@ -1196,9 +1198,21 @@ def _upload_recipe_image(recipe_id: int, image_url: str) -> str | None:
         elif "webp" in content_type:
             ext = "webp"
 
-        filename = f"recipe_{recipe_id}.{ext}"
+        # Use a random token to prevent filename collisions on ID reuse (e.g. after factory reset)
+        unique_token = uuid.uuid4().hex[:8]
+        filename = f"recipe_{recipe_id}_{unique_token}.{ext}"
 
         _api_put_raw(f"files/recipes/{filename}", r.content, content_type=content_type)
+        log.debug("Uploaded recipe image: %s", filename)
+
+        # Clean up the old image file if replacing
+        if old_filename and old_filename != filename:
+            try:
+                _api_delete(f"files/recipes/{old_filename}")
+                log.debug("Deleted old recipe image: %s", old_filename)
+            except Exception as exc:
+                log.warning("Failed to delete old recipe image '%s': %s", old_filename, exc)
+
         return filename
     except Exception as exc:
         log.warning("Failed to upload recipe image: %s", exc)
@@ -1496,7 +1510,22 @@ def _add_to_shopping_list(recipe_id: int, mode: str) -> dict:
 
 def _delete_recipe(recipe_id: int) -> None:
     """Delete a recipe from Storage (cascades ingredients automatically)."""
+    # Fetch picture_filename before deleting so we can clean up the image file
+    try:
+        recipe = _api_get(f"recipes/{recipe_id}")
+        picture_filename = recipe.get("picture_filename")
+    except Exception:
+        picture_filename = None
+
     _api_delete(f"recipes/{recipe_id}")
+
+    if picture_filename:
+        try:
+            _api_delete(f"files/recipes/{picture_filename}")
+            log.debug("Deleted recipe image: %s", picture_filename)
+        except Exception as exc:
+            log.warning("Failed to delete recipe image '%s': %s", picture_filename, exc)
+
     log.info("Deleted recipe ID %d", recipe_id)
 
 
