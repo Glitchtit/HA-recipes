@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.4
+- Add Ollama support as an alternative AI provider for recipe scraping
+- `_fetch_ai_key_from_storage()` now calls `/api/config/ai` and populates
+  `AI_PROVIDER`, `OLLAMA_URL`, `OLLAMA_MODEL` globals
+- Add `_call_ollama_json()` and `_call_ai_json()` dispatcher; all AI call sites
+  now route to Gemini or Ollama based on the configured provider
+
 ## 1.5.3
 
 - Fix Gemini DEADLINE_EXCEEDED timeouts when scraping recipes:

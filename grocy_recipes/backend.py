@@ -47,10 +47,15 @@ _LOCAL_GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "")
 GEMINI_KEY: str = _LOCAL_GEMINI_KEY
 GEMINI_MODEL: str = _LOCAL_GEMINI_MODEL or "gemini-2.0-flash"
 
+# Ollama config (fetched from Storage; no local override needed)
+AI_PROVIDER: str = "gemini"
+OLLAMA_URL: str = ""
+OLLAMA_MODEL: str = "llama3"
+
 PORT = 8100
 
 # ---------------------------------------------------------------------------
-# Fetch AI key from Storage (centralised key management)
+# Fetch AI config from Storage (centralised key management)
 # ---------------------------------------------------------------------------
 _AI_KEY_MAX_RETRIES = 30
 _AI_KEY_RETRY_INTERVAL = 5  # seconds
@@ -73,52 +78,68 @@ def wait_for_storage(base_url: str, max_retries: int = 30, delay: float = 5.0) -
 
 
 def _fetch_ai_key_from_storage() -> None:
-    """Fetch Gemini API key/model from Storage's ``/api/config/ai-key``.
+    """Fetch AI provider config from Storage's ``/api/config/ai``.
 
-    Retries up to *_AI_KEY_MAX_RETRIES* times with *_AI_KEY_RETRY_INTERVAL* s
-    between attempts.  If local config already provides a key, this is a no-op.
+    Supports both Gemini and Ollama.  If a local Gemini key env var is set,
+    it takes precedence and Gemini is used regardless of Storage config.
     """
-    global GEMINI_KEY, GEMINI_MODEL
+    global GEMINI_KEY, GEMINI_MODEL, AI_PROVIDER, OLLAMA_URL, OLLAMA_MODEL
 
     if _LOCAL_GEMINI_KEY:
         log.info("Using locally configured Gemini API key (override)")
         return
 
     if not STORAGE_URL:
-        log.warning("STORAGE_URL not set — cannot fetch AI key from Storage")
+        log.warning("STORAGE_URL not set — cannot fetch AI config from Storage")
         return
 
-    url = f"{STORAGE_URL}/api/config/ai-key"
+    url = f"{STORAGE_URL}/api/config/ai"
     for attempt in range(1, _AI_KEY_MAX_RETRIES + 1):
         try:
             r = requests.get(url, timeout=10)
             r.raise_for_status()
             data = r.json()
-            key = data.get("api_key", "")
-            model = data.get("model", "")
-            if key:
-                GEMINI_KEY = key
-                if model:
-                    GEMINI_MODEL = model
-                log.info(
-                    "Fetched AI key from Storage (model=%s, attempt %d)",
-                    GEMINI_MODEL, attempt,
-                )
-                return
-            log.warning("Storage returned empty AI key (attempt %d/%d)", attempt, _AI_KEY_MAX_RETRIES)
+            provider = data.get("provider", "gemini")
+            AI_PROVIDER = provider
+
+            if provider == "ollama":
+                ollama_url = data.get("ollama_url", "").strip()
+                ollama_model = data.get("ollama_model", "llama3").strip()
+                if ollama_url:
+                    OLLAMA_URL = ollama_url
+                    OLLAMA_MODEL = ollama_model or "llama3"
+                    log.info(
+                        "Fetched Ollama config from Storage (url=%s, model=%s, attempt %d)",
+                        OLLAMA_URL, OLLAMA_MODEL, attempt,
+                    )
+                    return
+                log.warning("Storage returned empty Ollama URL (attempt %d/%d)", attempt, _AI_KEY_MAX_RETRIES)
+            else:
+                key = data.get("api_key", "")
+                model = data.get("model", "")
+                if key:
+                    GEMINI_KEY = key
+                    if model:
+                        GEMINI_MODEL = model
+                    log.info(
+                        "Fetched Gemini key from Storage (model=%s, attempt %d)",
+                        GEMINI_MODEL, attempt,
+                    )
+                    return
+                log.warning("Storage returned empty Gemini key (attempt %d/%d)", attempt, _AI_KEY_MAX_RETRIES)
         except Exception as exc:
             log.warning(
-                "Failed to fetch AI key from Storage (attempt %d/%d): %s",
+                "Failed to fetch AI config from Storage (attempt %d/%d): %s",
                 attempt, _AI_KEY_MAX_RETRIES, exc,
             )
         if attempt < _AI_KEY_MAX_RETRIES:
             time.sleep(_AI_KEY_RETRY_INTERVAL)
 
-    log.error("Could not fetch AI key from Storage after %d attempts", _AI_KEY_MAX_RETRIES)
+    log.error("Could not fetch AI config from Storage after %d attempts", _AI_KEY_MAX_RETRIES)
 
 
 # ---------------------------------------------------------------------------
-# Gemini client
+# AI client (Gemini or Ollama)
 # ---------------------------------------------------------------------------
 _gemini_client: genai.Client | None = None
 
@@ -162,6 +183,38 @@ def _call_gemini_json(prompt: str) -> dict | list | None:
                 else:
                     time.sleep(2 ** attempt)
     return None
+
+
+def _call_ollama_json(prompt: str) -> dict | list | None:
+    """Call Ollama's chat endpoint and parse the response as JSON with retries."""
+    for attempt in range(1, _GEMINI_MAX_RETRIES + 1):
+        try:
+            resp = requests.post(
+                f"{OLLAMA_URL}/api/chat",
+                json={
+                    "model": OLLAMA_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "format": "json",
+                    "stream": False,
+                },
+                timeout=300,
+            )
+            resp.raise_for_status()
+            content = resp.json()["message"]["content"]
+            content = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", content)
+            return json.loads(content)
+        except Exception as exc:
+            log.warning("Ollama attempt %d/%d failed: %s", attempt, _GEMINI_MAX_RETRIES, exc)
+            if attempt < _GEMINI_MAX_RETRIES:
+                time.sleep(2 ** attempt)
+    return None
+
+
+def _call_ai_json(prompt: str) -> dict | list | None:
+    """Route AI call to Gemini or Ollama based on configured provider."""
+    if AI_PROVIDER == "ollama":
+        return _call_ollama_json(prompt)
+    return _call_gemini_json(prompt)
 
 
 # ---------------------------------------------------------------------------
@@ -484,7 +537,7 @@ RULES:
 - Be precise — "500g" means amount: 500, unit: "g" — NOT amount: 0.5, unit: "kg"
 - If multiple sizes appear, use the LAST/most specific one"""
 
-    result = _call_gemini_json(prompt)
+    result = _call_ai_json(prompt)
     if not result or not isinstance(result, list):
         log.warning("Gemini failed to determine product package sizes")
         return
@@ -704,7 +757,7 @@ RULES:
 - If you cannot reasonably estimate the density, return null for factor
 - Use the SIMPLEST conversion (prefer kg↔l over g↔ml)"""
 
-        result = _call_gemini_json(prompt)
+        result = _call_ai_json(prompt)
         if not result or not isinstance(result, list):
             log.warning("Gemini failed to estimate density conversions")
         else:
@@ -880,7 +933,7 @@ Rules:
 - Keep it short — 1-2 words maximum. Just the product type, no brands or quantities.
 - If already in Finnish, return as-is."""
 
-    result = _call_gemini_json(prompt)
+    result = _call_ai_json(prompt)
     if result and isinstance(result, dict) and result.get("search_term"):
         return result["search_term"]
     return ingredient_name
@@ -915,7 +968,7 @@ Rules:
 - Keep it short — 1-2 words maximum per ingredient. Just the product type, no brands or quantities.
 - If already in Finnish, return as-is."""
 
-    result = _call_gemini_json(prompt)
+    result = _call_ai_json(prompt)
     mapping: dict[str, str] = {}
     if result and isinstance(result, list):
         for item in result:
@@ -1085,7 +1138,7 @@ RULES:
 - Note: preparation detail like "hienonnettu", "viipaloitu", or null
 - Do NOT include any text outside the JSON array"""
 
-    result = _call_gemini_json(prompt)
+    result = _call_ai_json(prompt)
     if not result or not isinstance(result, list):
         log.warning("Ingredient translation failed — returning empty list")
         return []
@@ -1171,7 +1224,7 @@ Other rules:
 - Instructions should be clear numbered steps
 - Do NOT include any text outside the JSON object"""
 
-    result = _call_gemini_json(prompt)
+    result = _call_ai_json(prompt)
     if not result or not isinstance(result, dict):
         raise ValueError("Failed to extract recipe from page")
 
@@ -1269,7 +1322,7 @@ MATCHING RULES:
 - Do NOT match based on a word appearing inside a brand name or product description.
 - If the ingredient is a basic staple (suola, pippuri, sokeri, voi, maito, jauho), look for the generic parent product."""
 
-    result = _call_gemini_json(prompt)
+    result = _call_ai_json(prompt)
     if not result or not isinstance(result, list):
         return ingredients
 
