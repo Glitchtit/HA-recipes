@@ -1,3 +1,6 @@
+## 1.5.17
+- All recipes now use the two-step summarize→extract pipeline regardless of JSON-LD — eliminates remaining cases where JSON-LD ingredient strings with parenthetical annotations (e.g. "2 ägg (ca 120 g)") caused wrong units
+
 ## 1.5.16
 - Two-step recipe extraction: page is first summarized to strip parenthetical weight annotations (e.g. "2 ägg (ca 120 g)" → "2 ägg"), then structured JSON extracted from the clean summary — fixes "2 ägg → 2 g" bug
 - Strengthened `_translate_ingredients` prompt: ignores parenthetical weight/calorie notes; maps "to taste" / "salta väl" / "maun mukaan" to amount=null, unit=null

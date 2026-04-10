@@ -1358,17 +1358,17 @@ UNIT RULES (CRITICAL):
 
 
 def _scrape_recipe(url: str) -> dict:
-    """Scrape a recipe from URL using AI.
+    """Scrape a recipe from URL using a two-step AI pipeline.
 
-    Tries JSON-LD schema.org/Recipe extraction first (fast, no large AI call).
-    Falls back to a two-step approach: summarize the page first, then extract
-    structured JSON from the clean summary. This avoids problems where the raw
-    page includes parenthetical weight annotations (e.g. "2 ägg (ca 120 g)")
-    that confuse single-step extraction.
+    Step 1 — summarize: AI normalizes the raw page text (strips parenthetical
+    weight annotations, marks 'to taste' ingredients) into a clean recipe summary.
+    Step 2 — extract: AI extracts structured Finnish JSON from the clean summary.
+
+    All recipes go through both steps regardless of whether JSON-LD is present,
+    ensuring consistent ingredient parsing quality.
 
     Returns: {name, image_url, servings, source_url, ingredients: [{name, amount, unit, note}], instructions: [str]}
     """
-    # Fetch the page once; keep raw HTML for JSON-LD and image extraction
     r = requests.get(url, timeout=15, headers={
         "User-Agent": "Mozilla/5.0 (compatible; GrocyRecipes/1.0)"
     })
@@ -1376,39 +1376,9 @@ def _scrape_recipe(url: str) -> dict:
     raw_html = r.text
     image_url = _extract_image_url(url, raw_html)
 
-    # --- Fast path: JSON-LD schema.org/Recipe --------------------------------
-    schema = _find_jsonld_recipe(raw_html)
-    if schema:
-        log.info("Using JSON-LD recipe schema for %s", url)
-        name = schema.get("name", "")
-        servings = _parse_jsonld_servings(schema.get("recipeYield"))
-
-        # Parse instructions
-        instructions: list[str] = []
-        for step in schema.get("recipeInstructions", []):
-            if isinstance(step, str):
-                instructions.append(step.strip())
-            elif isinstance(step, dict):
-                text = step.get("text", step.get("name", ""))
-                if text:
-                    instructions.append(text.strip())
-
-        raw_ingredients = schema.get("recipeIngredient", [])
-        ingredients = _translate_ingredients(raw_ingredients)
-
-        return {
-            "name": name,
-            "servings": servings,
-            "ingredients": ingredients,
-            "instructions": instructions,
-            "source_url": url,
-            "image_url": image_url,
-        }
-
-    # --- Fallback: two-step summarize → extract ------------------------------
-    log.info("No JSON-LD found for %s — using two-step Gemini extraction", url)
     page_text = BeautifulSoup(raw_html, "html.parser").get_text(separator="\n", strip=True)[:8000]
 
+    log.info("Summarizing recipe page for %s", url)
     summary = _summarize_recipe(page_text, url)
     if not summary:
         raise ValueError("Failed to summarize recipe page")
