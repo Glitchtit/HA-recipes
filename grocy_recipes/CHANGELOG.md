@@ -1,3 +1,7 @@
+## 1.5.12
+- Recipe stubs now created as inactive group-master parent products (product_group_id = "Group master", active = false)
+- Stub parents are excluded from optimizer AI token budget and handled correctly by the group cleanup pass
+
 ## 1.5.11
 - Persistent service health monitoring: background loop never stops; re-detects Storage/Scraper if they go down, reloads nginx only when URL changes
 

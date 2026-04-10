@@ -1775,7 +1775,7 @@ def _handle_scrape(url: str) -> dict:
                     recipe_data.get("ingredients", []), products
                 )
 
-    # 6. Create stub parent products for any still-unmatched ingredients
+    # 6. Create stub parent products (group masters) for any still-unmatched ingredients
     stub_product_ids: set[int] = set()
     still_unmatched = [
         i for i in recipe_data.get("ingredients", [])
@@ -1803,6 +1803,21 @@ def _handle_scrape(url: str) -> dict:
                 "Cannot create stub products — no units or locations in Storage"
             )
         else:
+            # Resolve (or create) the "Group master" product group so stubs
+            # are tagged as group-master parents and stay inactive.
+            group_master_id = None
+            try:
+                groups = _api_get("product-groups")
+                for g in groups:
+                    if g.get("name") == "Group master":
+                        group_master_id = g["id"]
+                        break
+                if group_master_id is None:
+                    gm = _api_post("product-groups", {"name": "Group master"})
+                    group_master_id = gm.get("id")
+            except Exception as exc:
+                log.warning("Could not resolve 'Group master' group: %s", exc)
+
             for ing in still_unmatched:
                 stub_name = ing["name"]
                 log.warning(
@@ -1810,19 +1825,25 @@ def _handle_scrape(url: str) -> dict:
                     stub_name,
                 )
                 try:
-                    resp = _api_post("products", {
+                    stub_body: dict = {
                         "name": stub_name,
                         "description": "Auto-created by recipe scraper",
                         "location_id": default_loc_id,
                         "unit_id": default_unit_id,
                         "default_best_before_days": 0,
-                    })
+                        "active": False,
+                        "min_stock_amount": 0,
+                    }
+                    if group_master_id is not None:
+                        stub_body["product_group_id"] = group_master_id
+                    resp = _api_post("products", stub_body)
                     new_id = resp.get("id")
                     if new_id:
                         ing["_product_id"] = int(new_id)
                         stub_product_ids.add(int(new_id))
                         log.debug(
-                            "Created stub product '%s' (ID %s)", stub_name, new_id,
+                            "Created stub parent product '%s' (ID %s, group master)",
+                            stub_name, new_id,
                         )
                 except Exception as exc:
                     log.warning("Failed to create stub product '%s': %s", stub_name, exc)
