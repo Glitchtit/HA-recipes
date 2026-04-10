@@ -1,3 +1,6 @@
+## 1.5.14
+- Recipe ingredient matching now always resolves to parent/category products (e.g. "Kananmunat") instead of specific brand variants — child products are excluded from the AI matching list so recipes reference the general category, not a particular brand
+
 ## 1.5.13
 - Fix: AI ingredient parsing now correctly uses "kpl" for whole countable items with no unit (eggs/ägg, onion/lök, potato, etc.) instead of incorrectly inventing grams — both JSON-LD fast-path and full-page Gemini fallback updated
 

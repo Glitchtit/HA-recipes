@@ -1289,14 +1289,14 @@ def _ai_match_ingredients(
     if not unmatched:
         return ingredients
 
-    product_names = [
-        {"id": p["id"], "name": p["name"], "is_parent": p["id"] in {
-            int(pp["parent_id"])
-            for pp in products
-            if pp.get("parent_id")
-        }}
-        for p in products
-    ]
+    # Only offer parent/standalone products to the AI so the recipe always links
+    # to the general category (e.g. "Kananmunat") rather than a specific brand
+    # variant (e.g. "Pirkka vapaan kanan muna"). Child products have parent_id set.
+    matchable = [p for p in products if not p.get("parent_id")]
+    if not matchable:
+        matchable = products  # safety fallback when no parents exist yet
+
+    product_names = [{"id": p["id"], "name": p["name"]} for p in matchable]
 
     ingredient_list = json.dumps(
         [{"index": i, "name": ing["name"]} for i, ing in enumerate(unmatched)],
@@ -1315,7 +1315,7 @@ IMPORTANT CONTEXT:
 Ingredients to match:
 {ingredient_list}
 
-Available products (prefer products where is_parent=true):
+Available products (these are general-category products, not specific brands):
 {product_list}
 
 Return a JSON array of objects:
@@ -1323,13 +1323,12 @@ Return a JSON array of objects:
 
 MATCHING RULES:
 - Match by ingredient TYPE and MEANING, not by brand name or substring.
-  Example: "suola" (salt) should match a parent product "Suola" — NOT "Lay's Chips Salted" or any chip/crisp product.
-- "voi" (butter) should match "Voi" parent product — NOT "Voileipäkeksi" (sandwich cookie).
-- Prefer parent products (is_parent=true) over specific product variants.
-- A parent product represents a general category (e.g. "Maito" = any milk, "Voi" = any butter).
+  Example: "suola" (salt) should match "Suola" — NOT "Lay's Chips Salted" or any chip/crisp product.
+- "voi" (butter) should match "Voi" — NOT "Voileipäkeksi" (sandwich cookie).
+- A product here represents a general category (e.g. "Maito" = any milk, "Voi" = any butter).
 - Only match with "high" or "medium" confidence — set product_id to null for poor or uncertain matches.
 - Do NOT match based on a word appearing inside a brand name or product description.
-- If the ingredient is a basic staple (suola, pippuri, sokeri, voi, maito, jauho), look for the generic parent product."""
+- If the ingredient is a basic staple (suola, pippuri, sokeri, voi, maito, jauho), look for the generic product."""
 
     result = _call_ai_json(prompt)
     if not result or not isinstance(result, list):
