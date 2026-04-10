@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.7
+- Recipe now has its own AI config (ai_provider, gemini_api_key, gemini_model,
+  ollama_url, ollama_model) directly in addon config — no longer fetches from Storage
+- Removed _fetch_ai_key_from_storage() — AI provider/key/model read from env vars at startup
+
 ## 1.5.6
 - Fix startup log: now shows actual AI provider (gemini/ollama) and model/URL
   after fetching config from Storage instead of always logging "Gemini model: ..."

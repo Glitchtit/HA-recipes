@@ -70,15 +70,30 @@ else
     fi
 fi
 
-# AI key/model are optional local overrides — backend fetches from Storage if unset
+# AI key/model are read directly from addon config
+AI_PROVIDER="gemini"
+if bashio::config.has_value 'ai_provider'; then
+    AI_PROVIDER=$(bashio::config 'ai_provider')
+fi
+
 GEMINI_API_KEY=""
 if bashio::config.has_value 'gemini_api_key'; then
     GEMINI_API_KEY=$(bashio::config 'gemini_api_key')
 fi
 
-GEMINI_MODEL=""
+GEMINI_MODEL="gemini-2.0-flash"
 if bashio::config.has_value 'gemini_model'; then
     GEMINI_MODEL=$(bashio::config 'gemini_model')
+fi
+
+OLLAMA_URL=""
+if bashio::config.has_value 'ollama_url'; then
+    OLLAMA_URL=$(bashio::config 'ollama_url')
+fi
+
+OLLAMA_MODEL="llama3"
+if bashio::config.has_value 'ollama_model'; then
+    OLLAMA_MODEL=$(bashio::config 'ollama_model')
 fi
 
 DEBUG="false"
@@ -86,6 +101,6 @@ if bashio::config.true 'debug'; then
     DEBUG="true"
 fi
 
-export STORAGE_URL GEMINI_API_KEY GEMINI_MODEL DEBUG
+export STORAGE_URL AI_PROVIDER GEMINI_API_KEY GEMINI_MODEL OLLAMA_URL OLLAMA_MODEL DEBUG
 
 exec python3 /app/backend.py

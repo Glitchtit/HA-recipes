@@ -40,27 +40,18 @@ log = logging.getLogger("recipe-backend")
 # Configuration (from environment, set by s6-overlay run script)
 # ---------------------------------------------------------------------------
 STORAGE_URL = os.environ.get("STORAGE_URL", "").rstrip("/")
-# Local config values — used as overrides if set, otherwise fetched from Storage
-_LOCAL_GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
-_LOCAL_GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "")
 
-GEMINI_KEY: str = _LOCAL_GEMINI_KEY
-GEMINI_MODEL: str = _LOCAL_GEMINI_MODEL or "gemini-2.0-flash"
-
-# Ollama config (fetched from Storage; no local override needed)
-AI_PROVIDER: str = "gemini"
-OLLAMA_URL: str = ""
-OLLAMA_MODEL: str = "llama3"
+AI_PROVIDER: str = os.environ.get("AI_PROVIDER", "gemini").strip().lower()
+GEMINI_KEY: str = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash") or "gemini-2.0-flash"
+OLLAMA_URL: str = os.environ.get("OLLAMA_URL", "").rstrip("/")
+OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "llama3") or "llama3"
 
 PORT = 8100
 
 # ---------------------------------------------------------------------------
 # Fetch AI config from Storage (centralised key management)
 # ---------------------------------------------------------------------------
-_AI_KEY_MAX_RETRIES = 30
-_AI_KEY_RETRY_INTERVAL = 5  # seconds
-
-
 def wait_for_storage(base_url: str, max_retries: int = 30, delay: float = 5.0) -> None:
     """Block until Storage addon is reachable."""
     for attempt in range(1, max_retries + 1):
@@ -75,67 +66,6 @@ def wait_for_storage(base_url: str, max_retries: int = 30, delay: float = 5.0) -
             log.info("Storage not ready (attempt %d/%d), retrying in %.0fs…", attempt, max_retries, delay)
             time.sleep(delay)
     raise SystemExit("ERROR: Storage addon not reachable after %d attempts." % max_retries)
-
-
-def _fetch_ai_key_from_storage() -> None:
-    """Fetch AI provider config from Storage's ``/api/config/ai``.
-
-    Supports both Gemini and Ollama.  If a local Gemini key env var is set,
-    it takes precedence and Gemini is used regardless of Storage config.
-    """
-    global GEMINI_KEY, GEMINI_MODEL, AI_PROVIDER, OLLAMA_URL, OLLAMA_MODEL
-
-    if _LOCAL_GEMINI_KEY:
-        log.info("Using locally configured Gemini API key (override)")
-        return
-
-    if not STORAGE_URL:
-        log.warning("STORAGE_URL not set — cannot fetch AI config from Storage")
-        return
-
-    url = f"{STORAGE_URL}/api/config/ai"
-    for attempt in range(1, _AI_KEY_MAX_RETRIES + 1):
-        try:
-            r = requests.get(url, timeout=10)
-            r.raise_for_status()
-            data = r.json()
-            provider = data.get("provider", "gemini")
-            AI_PROVIDER = provider
-
-            if provider == "ollama":
-                ollama_url = data.get("ollama_url", "").strip()
-                ollama_model = data.get("ollama_model", "llama3").strip()
-                if ollama_url:
-                    OLLAMA_URL = ollama_url
-                    OLLAMA_MODEL = ollama_model or "llama3"
-                    log.info(
-                        "Fetched Ollama config from Storage (url=%s, model=%s, attempt %d)",
-                        OLLAMA_URL, OLLAMA_MODEL, attempt,
-                    )
-                    return
-                log.warning("Storage returned empty Ollama URL (attempt %d/%d)", attempt, _AI_KEY_MAX_RETRIES)
-            else:
-                key = data.get("api_key", "")
-                model = data.get("model", "")
-                if key:
-                    GEMINI_KEY = key
-                    if model:
-                        GEMINI_MODEL = model
-                    log.info(
-                        "Fetched Gemini key from Storage (model=%s, attempt %d)",
-                        GEMINI_MODEL, attempt,
-                    )
-                    return
-                log.warning("Storage returned empty Gemini key (attempt %d/%d)", attempt, _AI_KEY_MAX_RETRIES)
-        except Exception as exc:
-            log.warning(
-                "Failed to fetch AI config from Storage (attempt %d/%d): %s",
-                attempt, _AI_KEY_MAX_RETRIES, exc,
-            )
-        if attempt < _AI_KEY_MAX_RETRIES:
-            time.sleep(_AI_KEY_RETRY_INTERVAL)
-
-    log.error("Could not fetch AI config from Storage after %d attempts", _AI_KEY_MAX_RETRIES)
 
 
 # ---------------------------------------------------------------------------
@@ -2014,7 +1944,7 @@ def main() -> None:
 
     if STORAGE_URL:
         wait_for_storage(STORAGE_URL)
-    _fetch_ai_key_from_storage()
+
     if AI_PROVIDER == "ollama":
         log.info("AI provider: ollama (url=%s, model=%s)", OLLAMA_URL, OLLAMA_MODEL)
     else:
