@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.5
+- Log AI token usage after every successful AI call:
+  Gemini: prompt/output/total token counts; Ollama: prompt/output tokens + total duration (ms)
+
 ## 1.5.4
 - Add Ollama support as an alternative AI provider for recipe scraping
 - `_fetch_ai_key_from_storage()` now calls `/api/config/ai` and populates

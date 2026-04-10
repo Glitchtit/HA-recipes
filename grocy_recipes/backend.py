@@ -169,6 +169,15 @@ def _call_gemini_json(prompt: str) -> dict | list | None:
                     temperature=0.2,
                 ),
             )
+            # Log token usage when available
+            usage = getattr(resp, "usage_metadata", None)
+            if usage:
+                log.info(
+                    "Gemini usage — prompt tokens: %s, output tokens: %s, total: %s",
+                    getattr(usage, "prompt_token_count", "?"),
+                    getattr(usage, "candidates_token_count", "?"),
+                    getattr(usage, "total_token_count", "?"),
+                )
             text = resp.text or ""
             # Strip control chars that sometimes appear
             text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
@@ -200,7 +209,17 @@ def _call_ollama_json(prompt: str) -> dict | list | None:
                 timeout=300,
             )
             resp.raise_for_status()
-            content = resp.json()["message"]["content"]
+            data = resp.json()
+            # Log token/timing usage
+            prompt_tokens = data.get("prompt_eval_count", "?")
+            output_tokens = data.get("eval_count", "?")
+            total_ns = data.get("total_duration")
+            total_ms = round(total_ns / 1_000_000) if total_ns else "?"
+            log.info(
+                "Ollama usage — prompt tokens: %s, output tokens: %s, total duration: %sms",
+                prompt_tokens, output_tokens, total_ms,
+            )
+            content = data["message"]["content"]
             content = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", content)
             return json.loads(content)
         except Exception as exc:
