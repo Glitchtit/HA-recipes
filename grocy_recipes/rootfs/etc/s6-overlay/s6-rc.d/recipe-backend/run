@@ -2,7 +2,73 @@
 
 bashio::log.info "Starting recipe backend on port 8100..."
 
-STORAGE_URL=$(bashio::config 'storage_url')
+# ── Storage URL auto-detect ────────────────────────────────────────────────
+STORAGE_URL=""
+
+if bashio::config.has_value 'storage_url'; then
+    STORAGE_URL=$(bashio::config 'storage_url')
+    bashio::log.info "Storage URL (from config): ${STORAGE_URL}"
+else
+    bashio::log.info "Attempting auto-detect of HA-Storage addon..."
+
+    MY_HOSTNAME="${HOSTNAME:-}"
+    if [ -z "${MY_HOSTNAME}" ]; then
+        MY_HOSTNAME=$(hostname 2>/dev/null) || true
+    fi
+    if [ -z "${MY_HOSTNAME}" ] && [ -f /etc/hostname ]; then
+        MY_HOSTNAME=$(cat /etc/hostname 2>/dev/null) || true
+    fi
+
+    if [ -n "${MY_HOSTNAME}" ]; then
+        MY_HOSTNAME_NORM=$(echo "${MY_HOSTNAME}" | tr '_' '-')
+        REPO_PREFIX="${MY_HOSTNAME_NORM%%-grocy-recipes}"
+        if [ "${REPO_PREFIX}" != "${MY_HOSTNAME_NORM}" ] && [ -n "${REPO_PREFIX}" ]; then
+            for CANDIDATE in "${REPO_PREFIX}-ha-storage" "${REPO_PREFIX}_ha_storage"; do
+                if curl -sf --max-time 3 "http://${CANDIDATE}:8099/api/products" >/dev/null 2>&1; then
+                    STORAGE_URL="http://${CANDIDATE}:8099"
+                    bashio::log.info "Storage URL (auto-detected via hostname): ${STORAGE_URL}"
+                    break
+                fi
+            done
+        fi
+    fi
+
+    # Supervisor API fallback
+    if [ -z "${STORAGE_URL}" ] && [ -n "${SUPERVISOR_TOKEN}" ]; then
+        STORAGE_SLUG=""
+        STORAGE_SLUG=$(curl -sf --max-time 5 \
+            -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+            http://supervisor/addons \
+            | jq -r '
+                [.data.addons[]?
+                 | select(.slug | test("ha.storage"; "i"))
+                ][0].slug // empty
+            ' \
+        ) || true
+
+        if [ -n "${STORAGE_SLUG}" ]; then
+            STORAGE_IP=""
+            STORAGE_IP=$(curl -sf --max-time 5 \
+                -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+                "http://supervisor/addons/${STORAGE_SLUG}/info" \
+                | jq -r '.data.ip_address // empty' \
+            ) || true
+
+            if [ -n "${STORAGE_IP}" ]; then
+                STORAGE_URL="http://${STORAGE_IP}:8099"
+                bashio::log.info "Storage URL (auto-detected via API): ${STORAGE_URL}"
+            elif curl -sf --max-time 3 "http://${STORAGE_SLUG}:8099/api/products" >/dev/null 2>&1; then
+                STORAGE_URL="http://${STORAGE_SLUG}:8099"
+                bashio::log.info "Storage URL (auto-detected via slug): ${STORAGE_URL}"
+            fi
+        fi
+    fi
+
+    if [ -z "${STORAGE_URL}" ]; then
+        bashio::log.warning "HA-Storage addon not found — falling back to localhost."
+        STORAGE_URL="http://localhost:8099"
+    fi
+fi
 
 # AI key/model are optional local overrides — backend fetches from Storage if unset
 GEMINI_API_KEY=""

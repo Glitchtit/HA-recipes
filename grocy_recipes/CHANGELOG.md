@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.0
+
+- Auto-detect Storage URL from container hostname and Supervisor API
+- storage_url config now optional (auto-detected when not set)
+- Fix recipe image upload: resolve protocol-relative and relative URLs
+- Validate Content-Type before uploading images (reject non-image responses)
+- Pass actual content-type to Storage instead of hardcoded application/octet-stream
+
 ## 1.4.2
 
 - Backend waits for Storage health check on startup before serving requests

@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -994,7 +994,7 @@ def _extract_image_url(url: str, html: str | None = None) -> str | None:
         # Try og:image first
         og = soup.find("meta", property="og:image")
         if og and og.get("content"):
-            return og["content"]
+            return urljoin(url, og["content"])
         # Try schema.org recipe image
         for script in soup.find_all("script", type="application/ld+json"):
             try:
@@ -1007,7 +1007,9 @@ def _extract_image_url(url: str, html: str | None = None) -> str | None:
                         img = img[0]
                     if isinstance(img, dict):
                         img = img.get("url", "")
-                    return img if img else None
+                    if img:
+                        return urljoin(url, img)
+                    return None
             except Exception:
                 continue
         return None
@@ -1184,7 +1186,10 @@ def _upload_recipe_image(recipe_id: int, image_url: str) -> str | None:
             "User-Agent": "Mozilla/5.0 (compatible; GrocyRecipes/1.0)"
         })
         r.raise_for_status()
-        content_type = r.headers.get("Content-Type", "image/jpeg")
+        content_type = r.headers.get("Content-Type", "")
+        if not content_type.startswith("image/"):
+            log.warning("Skipping image upload: Content-Type is '%s', not an image", content_type)
+            return None
         ext = "jpg"
         if "png" in content_type:
             ext = "png"
@@ -1193,7 +1198,7 @@ def _upload_recipe_image(recipe_id: int, image_url: str) -> str | None:
 
         filename = f"recipe_{recipe_id}.{ext}"
 
-        _api_put_raw(f"files/recipes/{filename}", r.content)
+        _api_put_raw(f"files/recipes/{filename}", r.content, content_type=content_type)
         return filename
     except Exception as exc:
         log.warning("Failed to upload recipe image: %s", exc)
