@@ -65,8 +65,44 @@ else
     fi
 
     if [ -z "${STORAGE_URL}" ]; then
-        bashio::log.warning "HA-Storage addon not found — falling back to localhost."
-        STORAGE_URL="http://localhost:8099"
+        bashio::log.warning "HA-Storage addon not found — will retry every 5 s (up to 20 attempts)."
+        for _attempt in $(seq 1 20); do
+            sleep 5
+            MY_HOSTNAME_NORM=$(echo "${MY_HOSTNAME:-}" | tr '_' '-')
+            REPO_PREFIX="${MY_HOSTNAME_NORM%%-grocy-recipes}"
+            for _c in "${REPO_PREFIX}-ha-storage" "${REPO_PREFIX}_ha_storage"; do
+                if curl -sf --max-time 3 "http://${_c}:8099/api/products" >/dev/null 2>&1; then
+                    STORAGE_URL="http://${_c}:8099"
+                    break 2
+                fi
+            done
+            if [ -z "${STORAGE_URL}" ] && [ -n "${SUPERVISOR_TOKEN}" ]; then
+                _slug=$(curl -sf --max-time 5 \
+                    -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+                    http://supervisor/addons \
+                    | jq -r '[.data.addons[]? | select(.slug | test("ha.storage"; "i"))][0].slug // empty') || true
+                if [ -n "${_slug}" ]; then
+                    _ip=$(curl -sf --max-time 5 \
+                        -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+                        "http://supervisor/addons/${_slug}/info" \
+                        | jq -r '.data.ip_address // empty') || true
+                    if [ -n "${_ip}" ]; then
+                        STORAGE_URL="http://${_ip}:8099"
+                        break
+                    elif curl -sf --max-time 3 "http://${_slug}:8099/api/products" >/dev/null 2>&1; then
+                        STORAGE_URL="http://${_slug}:8099"
+                        break
+                    fi
+                fi
+            fi
+            bashio::log.info "Storage not found (attempt ${_attempt}/20) — retrying in 5 s..."
+        done
+        if [ -z "${STORAGE_URL}" ]; then
+            bashio::log.warning "HA-Storage addon still not found after retries — falling back to localhost."
+            STORAGE_URL="http://localhost:8099"
+        else
+            bashio::log.info "Storage URL (retry): ${STORAGE_URL}"
+        fi
     fi
 fi
 

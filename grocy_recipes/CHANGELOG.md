@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.5.10
+- Persistent service probing: if Storage addon is not found, retry every 5 s before starting (up to 100 s); if Scraper not found, retry every 30 s in background
+
 ## 1.5.9
 - Fix Claude JSON parsing: add `_extract_json_text()` helper to extract JSON from
   markdown-fenced or prose-prefixed Claude responses; fixes "Expecting value" parse errors
