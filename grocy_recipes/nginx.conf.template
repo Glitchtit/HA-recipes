@@ -38,7 +38,7 @@ http {
         index index.html;
 
         # ── Storage API proxy ──────────────────────────────────────────────
-        location /api/storage/ {
+        location ^~ /api/storage/ {
             proxy_pass         ${STORAGE_URL}/api/;
             proxy_set_header   Host              $http_host;
             proxy_set_header   X-Real-IP         $remote_addr;
@@ -48,7 +48,7 @@ http {
         }
 
         # ── Grocy Scraper proxy ───────────────────────────────────────────
-        location /api/scraper/ {
+        location ^~ /api/scraper/ {
             proxy_pass         ${SCRAPER_URL}/api/;
             proxy_set_header   Host              $http_host;
             proxy_set_header   X-Real-IP         $remote_addr;
@@ -60,7 +60,7 @@ http {
         }
 
         # ── Recipe backend proxy ──────────────────────────────────────────
-        location /api/backend/ {
+        location ^~ /api/backend/ {
             proxy_pass         http://127.0.0.1:8100/api/;
             proxy_set_header   Host              $http_host;
             proxy_set_header   X-Real-IP         $remote_addr;
@@ -72,7 +72,7 @@ http {
         }
 
         # ── Storage file proxy (for recipe images) ─────────────────────────
-        location /api/storage-files/ {
+        location ^~ /api/storage-files/ {
             proxy_pass         ${STORAGE_URL}/api/files/;
             proxy_set_header   Host              $http_host;
             proxy_set_header   X-Real-IP         $remote_addr;

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.1
+
+- Fix API proxy: nginx static asset regex no longer intercepts /api/ image and file requests
+
 ## 1.5.0
 
 - Auto-detect Storage URL from container hostname and Supervisor API
