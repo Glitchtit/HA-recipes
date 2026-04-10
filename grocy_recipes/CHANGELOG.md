@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.5.8
+- Add Claude AI provider support: `claude_api_key` + `claude_model` in config.json, run script, backend.py globals, `_call_claude_json()`, and `_call_ai_json()` dispatcher
+
 ## 1.5.7
 - Recipe now has its own AI config (ai_provider, gemini_api_key, gemini_model,
   ollama_url, ollama_model) directly in addon config — no longer fetches from Storage

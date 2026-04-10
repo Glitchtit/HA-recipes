@@ -46,6 +46,8 @@ GEMINI_KEY: str = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash") or "gemini-2.0-flash"
 OLLAMA_URL: str = os.environ.get("OLLAMA_URL", "").rstrip("/")
 OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "llama3") or "llama3"
+CLAUDE_API_KEY: str = os.environ.get("CLAUDE_API_KEY", "")
+CLAUDE_MODEL: str = os.environ.get("CLAUDE_MODEL", "claude-3-5-haiku-20241022") or "claude-3-5-haiku-20241022"
 
 PORT = 8100
 
@@ -159,10 +161,46 @@ def _call_ollama_json(prompt: str) -> dict | list | None:
     return None
 
 
+def _call_claude_json(prompt: str) -> dict | list | None:
+    """Call Claude API and parse the response as JSON with retries."""
+    try:
+        import anthropic as _anthropic
+    except ImportError:
+        log.error("anthropic package not installed; cannot call Claude")
+        return None
+    _MAX_RETRIES = _GEMINI_MAX_RETRIES
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            client = _anthropic.Anthropic(api_key=CLAUDE_API_KEY)
+            response = client.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=8192,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            usage = response.usage
+            log.info(
+                "Claude usage — input tokens: %s, output tokens: %s",
+                getattr(usage, "input_tokens", "?"),
+                getattr(usage, "output_tokens", "?"),
+            )
+            text = response.content[0].text or ""
+            text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
+            # Strip markdown code fences if present
+            text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
+            return json.loads(text)
+        except Exception as exc:
+            log.warning("Claude attempt %d/%d failed: %s", attempt, _MAX_RETRIES, exc)
+            if attempt < _MAX_RETRIES:
+                time.sleep(2 ** attempt)
+    return None
+
+
 def _call_ai_json(prompt: str) -> dict | list | None:
-    """Route AI call to Gemini or Ollama based on configured provider."""
+    """Route AI call to Gemini, Ollama, or Claude based on configured provider."""
     if AI_PROVIDER == "ollama":
         return _call_ollama_json(prompt)
+    if AI_PROVIDER == "claude":
+        return _call_claude_json(prompt)
     return _call_gemini_json(prompt)
 
 
@@ -1947,6 +1985,8 @@ def main() -> None:
 
     if AI_PROVIDER == "ollama":
         log.info("AI provider: ollama (url=%s, model=%s)", OLLAMA_URL, OLLAMA_MODEL)
+    elif AI_PROVIDER == "claude":
+        log.info("AI provider: claude (model=%s)", CLAUDE_MODEL)
     else:
         log.info("AI provider: gemini (model=%s)", GEMINI_MODEL)
 

@@ -1,6 +1,6 @@
 {
   "name": "Recipe",
-  "version": "1.5.7",
+  "version": "1.5.8",
   "slug": "grocy_recipes",
   "description": "AI-powered recipe scraper with smart shopping lists",
   "url": "https://github.com/Glitchtit/HA-grocy-recipes",
@@ -21,6 +21,8 @@
     "gemini_model": "gemini-2.0-flash",
     "ollama_url": "",
     "ollama_model": "llama3",
+    "claude_api_key": "",
+    "claude_model": "claude-3-5-haiku-20241022",
     "debug": false
   },
   "schema": {
@@ -30,6 +32,8 @@
     "gemini_model": "str?",
     "ollama_url": "str?",
     "ollama_model": "str?",
+    "claude_api_key": "str?",
+    "claude_model": "str?",
     "scraper_url": "url?",
     "debug": "bool?"
   }
