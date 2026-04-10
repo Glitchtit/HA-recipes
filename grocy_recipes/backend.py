@@ -122,7 +122,7 @@ def _fetch_ai_key_from_storage() -> None:
 # ---------------------------------------------------------------------------
 _gemini_client: genai.Client | None = None
 
-_GEMINI_MAX_RETRIES = 3
+_GEMINI_MAX_RETRIES = 4
 
 
 def _get_gemini() -> genai.Client:
@@ -130,7 +130,7 @@ def _get_gemini() -> genai.Client:
     if _gemini_client is None:
         _gemini_client = genai.Client(
             api_key=GEMINI_KEY,
-            http_options={"timeout": 120_000},
+            http_options={"timeout": 300_000},
         )
     return _gemini_client
 
@@ -153,9 +153,14 @@ def _call_gemini_json(prompt: str) -> dict | list | None:
             text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
             return json.loads(text)
         except Exception as exc:
+            exc_str = str(exc)
             log.warning("Gemini attempt %d/%d failed: %s", attempt, _GEMINI_MAX_RETRIES, exc)
             if attempt < _GEMINI_MAX_RETRIES:
-                time.sleep(2 ** attempt)
+                # Server-side deadline expiry: wait longer before retry
+                if "DEADLINE_EXCEEDED" in exc_str or "504" in exc_str:
+                    time.sleep(30)
+                else:
+                    time.sleep(2 ** attempt)
     return None
 
 
@@ -967,6 +972,7 @@ def _scraper_discover(product_name: str, search_term: str | None = None) -> dict
         return None
 
 
+
 # ---------------------------------------------------------------------------
 # Recipe scraping (Gemini AI)
 # ---------------------------------------------------------------------------
@@ -1018,20 +1024,122 @@ def _extract_image_url(url: str, html: str | None = None) -> str | None:
         return None
 
 
+def _find_jsonld_recipe(html: str) -> dict | None:
+    """Find and return a schema.org Recipe object from JSON-LD script tags."""
+    soup = BeautifulSoup(html, "html.parser")
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string or "")
+        except Exception:
+            continue
+        candidates = data if isinstance(data, list) else [data]
+        for item in candidates:
+            if not isinstance(item, dict):
+                continue
+            # Handle @graph wrapper
+            if "@graph" in item:
+                for node in item["@graph"]:
+                    if isinstance(node, dict) and node.get("@type") == "Recipe":
+                        return node
+            if item.get("@type") == "Recipe":
+                return item
+    return None
+
+
+def _parse_jsonld_servings(yield_val: Any) -> int:
+    """Parse recipeYield into an integer serving count."""
+    if isinstance(yield_val, (int, float)):
+        return int(yield_val)
+    if isinstance(yield_val, list) and yield_val:
+        yield_val = yield_val[0]
+    if isinstance(yield_val, str):
+        m = re.search(r"\d+", yield_val)
+        if m:
+            return int(m.group())
+    return 4
+
+
+def _translate_ingredients(raw_ingredients: list[str]) -> list[dict]:
+    """Use Gemini to parse and translate a list of ingredient strings to Finnish.
+
+    Input: ["2 dl mjölk", "1 msk smör", "salt"]
+    Output: [{"name": "maito", "amount": 2.0, "unit": "dl", "note": null}, ...]
+    """
+    if not raw_ingredients:
+        return []
+
+    lines = "\n".join(f"- {ing}" for ing in raw_ingredients)
+    prompt = f"""Parse and translate these recipe ingredients to Finnish structured JSON.
+
+Ingredient strings:
+{lines}
+
+Return a JSON array, one object per ingredient:
+[{{"name": "Finnish ingredient name", "amount": <number or null>, "unit": "unit or null", "note": "prep note or null"}}]
+
+RULES:
+- Translate ALL ingredient names to Finnish (smör→voi, mjölk→maito, butter→voi, milk→maito, salt→suola, flour→vehnäjauho, egg→kananmuna, potato→peruna, etc.)
+- Name must be a simple generic product name (e.g. "kananmuna" not "3 kananmunaa")
+- Amount: extract the numeric quantity (float), or null if absent
+- Unit: standard Finnish abbreviation (dl, ml, l, g, kg, kpl, tl, rkl, rs) or null
+- Note: preparation detail like "hienonnettu", "viipaloitu", or null
+- Do NOT include any text outside the JSON array"""
+
+    result = _call_gemini_json(prompt)
+    if not result or not isinstance(result, list):
+        log.warning("Ingredient translation failed — returning empty list")
+        return []
+    return result
+
+
 def _scrape_recipe(url: str) -> dict:
     """Scrape a recipe from URL using Gemini AI.
 
+    Tries JSON-LD schema.org/Recipe extraction first (fast, no large Gemini call).
+    Falls back to sending page text to Gemini if no structured data is found.
+
     Returns: {name, image_url, servings, source_url, ingredients: [{name, amount, unit, note}], instructions: [str]}
     """
-    # Fetch the page
+    # Fetch the page once; keep raw HTML for JSON-LD and image extraction
     r = requests.get(url, timeout=15, headers={
         "User-Agent": "Mozilla/5.0 (compatible; GrocyRecipes/1.0)"
     })
     r.raise_for_status()
     raw_html = r.text
-    page_text = BeautifulSoup(raw_html, "html.parser").get_text(separator="\n", strip=True)[:15000]
-
     image_url = _extract_image_url(url, raw_html)
+
+    # --- Fast path: JSON-LD schema.org/Recipe --------------------------------
+    schema = _find_jsonld_recipe(raw_html)
+    if schema:
+        log.info("Using JSON-LD recipe schema for %s", url)
+        name = schema.get("name", "")
+        servings = _parse_jsonld_servings(schema.get("recipeYield"))
+
+        # Parse instructions
+        instructions: list[str] = []
+        for step in schema.get("recipeInstructions", []):
+            if isinstance(step, str):
+                instructions.append(step.strip())
+            elif isinstance(step, dict):
+                text = step.get("text", step.get("name", ""))
+                if text:
+                    instructions.append(text.strip())
+
+        raw_ingredients = schema.get("recipeIngredient", [])
+        ingredients = _translate_ingredients(raw_ingredients)
+
+        return {
+            "name": name,
+            "servings": servings,
+            "ingredients": ingredients,
+            "instructions": instructions,
+            "source_url": url,
+            "image_url": image_url,
+        }
+
+    # --- Fallback: send page text to Gemini ---------------------------------
+    log.info("No JSON-LD found for %s — using full-page Gemini extraction", url)
+    page_text = BeautifulSoup(raw_html, "html.parser").get_text(separator="\n", strip=True)[:8000]
 
     prompt = f"""Analyze this recipe page and extract the recipe as structured JSON.
 

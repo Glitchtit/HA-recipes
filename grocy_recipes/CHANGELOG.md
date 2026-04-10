@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.3
+
+- Fix Gemini DEADLINE_EXCEEDED timeouts when scraping recipes:
+  - JSON-LD fast path: extract schema.org/Recipe structured data directly from page HTML (works for most modern recipe sites like koket.se, zeinaskitchen.se). Only a small focused Gemini call is needed for ingredient translation to Finnish — much faster and more reliable than sending full page text.
+  - Full-page fallback text trimmed from 15,000 to 8,000 characters for sites without JSON-LD.
+  - Retry backoff for DEADLINE_EXCEEDED/504 increased to 30 seconds (from 2–4 s).
+  - Max retries increased from 3 to 4.
+  - Client-side HTTP timeout increased from 120 s to 300 s.
+
 ## 1.5.2
 
 - Fix recipe image duplication: filenames now include a random token to prevent collisions when recipe IDs are reused after factory reset
