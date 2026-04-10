@@ -143,47 +143,64 @@ envsubst '${STORAGE_URL} ${SCRAPER_URL} ${NGINX_LOG_ROUTINE}' \
   < /etc/nginx/nginx.conf.template \
   > /etc/nginx/nginx.conf
 
-_need_probe=0
-[ "${STORAGE_AUTODETECT}" = "1" ] && [ "${STORAGE_URL}" = "${_STORAGE_FALLBACK}" ] && _need_probe=1
-[ "${SCRAPER_AUTODETECT}" = "1" ] && [ "${SCRAPER_URL}" = "${_SCRAPER_PLACEHOLDER}" ] && _need_probe=1
-
-if [ "${_need_probe}" = "1" ]; then
-    bashio::log.info "Starting background service probe (every 30 s)..."
+# Background health monitor: runs forever when any service is in auto-detect mode.
+# - Not found: keep probing.
+# - Found but unreachable: re-detect; reload nginx only if URL changed or reverted.
+if [ "${STORAGE_AUTODETECT}" = "1" ] || [ "${SCRAPER_AUTODETECT}" = "1" ]; then
+    bashio::log.info "Starting background service health monitor (every 30 s)..."
     (
         _cur_storage="${STORAGE_URL}"
         _cur_scraper="${SCRAPER_URL}"
         while sleep 30; do
             _changed=0
-            if [ "${_cur_storage}" = "${_STORAGE_FALLBACK}" ] && [ "${STORAGE_AUTODETECT}" = "1" ]; then
-                _new=$(_detect_storage)
-                if [ -n "${_new}" ]; then
-                    bashio::log.info "Storage found at ${_new} -- updating config."
-                    _cur_storage="${_new}"
-                    _changed=1
+
+            if [ "${STORAGE_AUTODETECT}" = "1" ]; then
+                if [ "${_cur_storage}" = "${_STORAGE_FALLBACK}" ]; then
+                    _new=$(_detect_storage)
+                    if [ -n "${_new}" ]; then
+                        bashio::log.info "Storage found at ${_new} -- updating config."
+                        _cur_storage="${_new}"; _changed=1
+                    fi
+                elif ! curl -sf --max-time 3 "${_cur_storage}/api/health" >/dev/null 2>&1; then
+                    bashio::log.warning "Storage at ${_cur_storage} unreachable -- re-detecting..."
+                    _new=$(_detect_storage)
+                    if [ -n "${_new}" ] && [ "${_new}" != "${_cur_storage}" ]; then
+                        bashio::log.info "Storage re-detected at ${_new}."
+                        _cur_storage="${_new}"; _changed=1
+                    elif [ -z "${_new}" ]; then
+                        bashio::log.warning "Storage not found -- reverting to fallback."
+                        _cur_storage="${_STORAGE_FALLBACK}"; _changed=1
+                    fi
                 fi
             fi
-            if [ "${_cur_scraper}" = "${_SCRAPER_PLACEHOLDER}" ] && [ "${SCRAPER_AUTODETECT}" = "1" ]; then
-                _new=$(_detect_scraper)
-                if [ -n "${_new}" ]; then
-                    bashio::log.info "Scraper found at ${_new} -- updating config."
-                    _cur_scraper="${_new}"
-                    _changed=1
+
+            if [ "${SCRAPER_AUTODETECT}" = "1" ]; then
+                if [ "${_cur_scraper}" = "${_SCRAPER_PLACEHOLDER}" ]; then
+                    _new=$(_detect_scraper)
+                    if [ -n "${_new}" ]; then
+                        bashio::log.info "Scraper found at ${_new} -- updating config."
+                        _cur_scraper="${_new}"; _changed=1
+                    fi
+                elif ! curl -sf --max-time 3 "${_cur_scraper}/api/config" >/dev/null 2>&1; then
+                    bashio::log.warning "Scraper at ${_cur_scraper} unreachable -- re-detecting..."
+                    _new=$(_detect_scraper)
+                    if [ -n "${_new}" ] && [ "${_new}" != "${_cur_scraper}" ]; then
+                        bashio::log.info "Scraper re-detected at ${_new}."
+                        _cur_scraper="${_new}"; _changed=1
+                    elif [ -z "${_new}" ]; then
+                        bashio::log.warning "Scraper not found -- reverting to placeholder."
+                        _cur_scraper="${_SCRAPER_PLACEHOLDER}"; _changed=1
+                    fi
                 fi
             fi
+
             if [ "${_changed}" = "1" ]; then
                 STORAGE_URL="${_cur_storage}"
                 SCRAPER_URL="${_cur_scraper}"
                 envsubst '${STORAGE_URL} ${SCRAPER_URL} ${NGINX_LOG_ROUTINE}' \
                   < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
                 nginx -s reload
-                bashio::log.info "nginx reloaded with updated service URLs."
-            fi
-            _all_found=1
-            [ "${_cur_storage}" = "${_STORAGE_FALLBACK}" ] && _all_found=0
-            [ "${_cur_scraper}" = "${_SCRAPER_PLACEHOLDER}" ] && _all_found=0
-            if [ "${_all_found}" = "1" ]; then
-                bashio::log.info "All services found -- stopping background probe."
-                break
+                bashio::log.info "nginx reloaded (storage: ${_cur_storage}, scraper: ${_cur_scraper})."
             fi
         done
     ) &

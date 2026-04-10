@@ -1,3 +1,6 @@
+## 1.5.11
+- Persistent service health monitoring: background loop never stops; re-detects Storage/Scraper if they go down, reloads nginx only when URL changes
+
 # Changelog
 
 ## 1.5.10
