@@ -1,3 +1,6 @@
+## 1.5.13
+- Fix: AI ingredient parsing now correctly uses "kpl" for whole countable items with no unit (eggs/ägg, onion/lök, potato, etc.) instead of incorrectly inventing grams — both JSON-LD fast-path and full-page Gemini fallback updated
+
 ## 1.5.12
 - Recipe stubs now created as inactive group-master parent products (product_group_id = "Group master", active = false)
 - Stub parents are excluded from optimizer AI token budget and handled correctly by the group cleanup pass

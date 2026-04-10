@@ -1130,11 +1130,16 @@ Return a JSON array, one object per ingredient:
 [{{"name": "Finnish ingredient name", "amount": <number or null>, "unit": "unit or null", "note": "prep note or null"}}]
 
 RULES:
-- Translate ALL ingredient names to Finnish (smör→voi, mjölk→maito, butter→voi, milk→maito, salt→suola, flour→vehnäjauho, egg→kananmuna, potato→peruna, etc.)
+- Translate ALL ingredient names to Finnish (smör→voi, mjölk→maito, butter→voi, milk→maito, salt→suola, flour→vehnäjauho, egg→kananmuna, ägg→kananmuna, potato→peruna, lök→sipuli, vitlök→valkosipuli, etc.)
 - Name must be a simple generic product name (e.g. "kananmuna" not "3 kananmunaa")
 - Amount: extract the numeric quantity (float), or null if absent
-- Unit: standard Finnish abbreviation (dl, ml, l, g, kg, kpl, tl, rkl, rs) or null
+- Unit rules (CRITICAL — follow exactly):
+  * If the source already has a unit (dl, ml, l, g, kg, tsk, msk, msk, tbsp, tsp, cup, etc.) → translate it to the Finnish abbreviation (dl, ml, l, g, kg, tl, rkl)
+  * If the source has NO unit and the ingredient is a whole countable item (egg/ägg/kananmuna, onion/lök/sipuli, potato/peruna, clove/vitlöksklyfta, carrot/morot/porkkana, etc.) → unit = "kpl"
+  * If the source has NO unit and the ingredient is not a countable item (salt, pepper, oil, etc.) → unit = null
+  * NEVER invent a weight unit (g/kg) when no unit is given in the source string
 - Note: preparation detail like "hienonnettu", "viipaloitu", or null
+- Examples: "2 ägg" → name="kananmuna", amount=2, unit="kpl" | "3 eggs" → name="kananmuna", amount=3, unit="kpl" | "1 lök" → name="sipuli", amount=1, unit="kpl"
 - Do NOT include any text outside the JSON array"""
 
     result = _call_ai_json(prompt)
@@ -1219,7 +1224,12 @@ CRITICAL LANGUAGE RULES:
 
 Other rules:
 - Amount should be a number (float), not a string
-- Unit should be a standard abbreviation (dl, ml, l, g, kg, kpl, tl, rkl, rs) or null for count items
+- Unit rules (CRITICAL — follow exactly):
+  * If the source already has a unit (dl, ml, l, g, kg, tsk, msk, tbsp, tsp, cup, etc.) → translate it to standard Finnish abbreviation (dl, ml, l, g, kg, tl, rkl)
+  * If NO unit is given and the ingredient is a whole countable item (egg/ägg/kananmuna, onion/lök/sipuli, potato/peruna, carrot/morot/porkkana, clove/klyfta, etc.) → unit = "kpl"
+  * If NO unit is given and the ingredient is not countable (salt, pepper, oil, etc.) → unit = null
+  * NEVER invent a weight (g/kg) when no unit appears in the source
+  * Examples: "2 ägg" → unit="kpl" | "3 eggs" → unit="kpl" | "1 lök" → unit="kpl" | "salt" → unit=null
 - Instructions should be clear numbered steps
 - Do NOT include any text outside the JSON object"""
 
