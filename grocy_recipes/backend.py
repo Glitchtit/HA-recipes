@@ -2015,7 +2015,10 @@ def main() -> None:
     if STORAGE_URL:
         wait_for_storage(STORAGE_URL)
     _fetch_ai_key_from_storage()
-    log.info("Gemini model: %s", GEMINI_MODEL)
+    if AI_PROVIDER == "ollama":
+        log.info("AI provider: ollama (url=%s, model=%s)", OLLAMA_URL, OLLAMA_MODEL)
+    else:
+        log.info("AI provider: gemini (model=%s)", GEMINI_MODEL)
 
     server = _ThreadingHTTPServer(("0.0.0.0", PORT), _Handler)
     try:

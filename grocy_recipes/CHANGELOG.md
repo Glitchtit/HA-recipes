@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.6
+- Fix startup log: now shows actual AI provider (gemini/ollama) and model/URL
+  after fetching config from Storage instead of always logging "Gemini model: ..."
+
 ## 1.5.5
 - Log AI token usage after every successful AI call:
   Gemini: prompt/output/total token counts; Ollama: prompt/output tokens + total duration (ms)
