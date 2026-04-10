@@ -1,3 +1,6 @@
+## 1.5.15
+- Recipe ingredient matching now restricted to products in the "Group master" product group (including inactive stubs) — resolves matching to specific branded products and eliminates duplicate stub creation when re-scraping the same recipe
+
 ## 1.5.14
 - Recipe ingredient matching now always resolves to parent/category products (e.g. "Kananmunat") instead of specific brand variants — child products are excluded from the AI matching list so recipes reference the general category, not a particular brand
 

@@ -1250,25 +1250,51 @@ def _get_all_products() -> list[dict]:
     return _api_get("products")
 
 
-def _match_ingredient(name: str, products: list[dict]) -> dict | None:
+def _get_group_master_products() -> tuple[int | None, list[dict]]:
+    """Return (group_master_id, products in 'Group master' group including inactive).
+
+    Inactive products are included so stubs created by previous scrapes are
+    visible and will be matched instead of being duplicated.
+    Returns (None, []) if the group doesn't exist yet.
+    """
+    try:
+        groups = _api_get("product-groups")
+        group_master_id = None
+        for g in groups:
+            if g.get("name") == "Group master":
+                group_master_id = g["id"]
+                break
+        if group_master_id is None:
+            return None, []
+        gm_products = _api_get(
+            "products",
+            params={"active_only": "false", "group_id": str(group_master_id)},
+        )
+        return group_master_id, gm_products
+    except Exception as exc:
+        log.warning("Could not fetch Group master products: %s", exc)
+        return None, []
+
+
+def _match_ingredient(
+    name: str,
+    products: list[dict],
+    group_masters: list[dict] | None = None,
+) -> dict | None:
     """Find the best matching product for an ingredient name.
 
-    Only uses exact match. Substring matching is intentionally avoided to
-    prevent false positives like "salt" → "Lay's Chips Salted".
-    Prefers parent products (products that other products reference as parent).
+    When *group_masters* is provided (even if empty), matching is restricted
+    to that list — recipes always link to Group master category products.
+    When *group_masters* is None, falls back to exact-match over all products
+    (climbing to parent if a child is matched).
     """
     name_lower = name.lower().strip()
+    candidates = group_masters if group_masters is not None else products
 
-    parent_ids = {
-        int(p["parent_id"])
-        for p in products
-        if p.get("parent_id")
-    }
-
-    # Exact name match only
-    for p in products:
+    for p in candidates:
         if p["name"].lower().strip() == name_lower:
-            # If this product has a parent, prefer the parent
+            # Group master products have no parent_id, but keep climb logic
+            # when called without group_masters (legacy fallback path).
             if p.get("parent_id"):
                 parent = next(
                     (pp for pp in products if pp["id"] == int(p["parent_id"])),
@@ -1282,19 +1308,26 @@ def _match_ingredient(name: str, products: list[dict]) -> dict | None:
 
 
 def _ai_match_ingredients(
-    ingredients: list[dict], products: list[dict]
+    ingredients: list[dict],
+    products: list[dict],
+    group_masters: list[dict] | None = None,
 ) -> list[dict]:
     """Use Gemini AI to match ingredients to Grocy products when simple matching fails."""
     unmatched = [i for i in ingredients if i.get("_product_id") is None]
     if not unmatched:
         return ingredients
 
-    # Only offer parent/standalone products to the AI so the recipe always links
-    # to the general category (e.g. "Kananmunat") rather than a specific brand
-    # variant (e.g. "Pirkka vapaan kanan muna"). Child products have parent_id set.
-    matchable = [p for p in products if not p.get("parent_id")]
+    # Restrict AI to Group master products when available so recipes always
+    # link to general-category products, not specific branded variants.
+    if group_masters is not None:
+        matchable = group_masters
+    else:
+        matchable = [p for p in products if not p.get("parent_id")]
+        if not matchable:
+            matchable = products
+
     if not matchable:
-        matchable = products  # safety fallback when no parents exist yet
+        return ingredients
 
     product_names = [{"id": p["id"], "name": p["name"]} for p in matchable]
 
@@ -1716,12 +1749,15 @@ def _handle_scrape(url: str) -> dict:
         len(recipe_data.get("ingredients", [])),
     )
 
-    # 2. Get all Grocy products (cached for the duration of this scrape)
+    # 2. Get all active products and Group master products (including inactive stubs).
+    # Group master products are used for matching so recipes always link to
+    # category-level products; fetching inactive products prevents duplicate stubs.
     products = _get_all_products()
+    group_master_id, group_master_products = _get_group_master_products()
 
     # 3. Match ingredients to products
     for ing in recipe_data.get("ingredients", []):
-        match = _match_ingredient(ing["name"], products)
+        match = _match_ingredient(ing["name"], products, group_masters=group_master_products)
         if match:
             ing["_product_id"] = match["id"]
             log.debug("Matched '%s' → '%s' (ID %d)", ing["name"], match["name"], match["id"])
@@ -1730,7 +1766,7 @@ def _handle_scrape(url: str) -> dict:
 
     # 4. AI-assisted matching for unmatched
     recipe_data["ingredients"] = _ai_match_ingredients(
-        recipe_data.get("ingredients", []), products
+        recipe_data.get("ingredients", []), products, group_masters=group_master_products
     )
 
     # 5. Discover missing products via scraper (batch-translated, parallel)
@@ -1761,12 +1797,13 @@ def _handle_scrape(url: str) -> dict:
                     log.warning("Scraper discover thread failed: %s", exc)
 
         if any_discovered:
-            # Refresh products once after all discovers complete
+            # Refresh products and Group master products after discovers complete
             products = _get_all_products()
+            group_master_id, group_master_products = _get_group_master_products()
             for ing in unmatched:
                 if ing.get("_product_id") is not None:
                     continue
-                match = _match_ingredient(ing["name"], products)
+                match = _match_ingredient(ing["name"], products, group_masters=group_master_products)
                 if match:
                     ing["_product_id"] = match["id"]
                     log.debug(
@@ -1781,7 +1818,7 @@ def _handle_scrape(url: str) -> dict:
             ]
             if still_unmatched_after_discover:
                 recipe_data["ingredients"] = _ai_match_ingredients(
-                    recipe_data.get("ingredients", []), products
+                    recipe_data.get("ingredients", []), products, group_masters=group_master_products
                 )
 
     # 6. Create stub parent products (group masters) for any still-unmatched ingredients
@@ -1812,20 +1849,14 @@ def _handle_scrape(url: str) -> dict:
                 "Cannot create stub products — no units or locations in Storage"
             )
         else:
-            # Resolve (or create) the "Group master" product group so stubs
-            # are tagged as group-master parents and stay inactive.
-            group_master_id = None
-            try:
-                groups = _api_get("product-groups")
-                for g in groups:
-                    if g.get("name") == "Group master":
-                        group_master_id = g["id"]
-                        break
-                if group_master_id is None:
+            # Reuse group_master_id resolved above; create the group only if
+            # it didn't exist yet at the start of this scrape.
+            if group_master_id is None:
+                try:
                     gm = _api_post("product-groups", {"name": "Group master"})
                     group_master_id = gm.get("id")
-            except Exception as exc:
-                log.warning("Could not resolve 'Group master' group: %s", exc)
+                except Exception as exc:
+                    log.warning("Could not create 'Group master' group: %s", exc)
 
             for ing in still_unmatched:
                 stub_name = ing["name"]
