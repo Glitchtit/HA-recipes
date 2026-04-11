@@ -1,3 +1,6 @@
+## 1.5.23
+- Fix: recipe instructions now rendered as a numbered list — each step is a separate line item instead of all steps joined into one unreadable text blob
+
 ## 1.5.22
 - Fix: dedup substring match now uses word-boundary regex — prevents short ingredient names like "voi" (butter) from matching mid-word inside unrelated product names like "virvoitusjuoma"
 
