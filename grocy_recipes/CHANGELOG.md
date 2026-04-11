@@ -1,3 +1,6 @@
+## 1.5.22
+- Fix: dedup substring match now uses word-boundary regex — prevents short ingredient names like "voi" (butter) from matching mid-word inside unrelated product names like "virvoitusjuoma"
+
 ## 1.5.21
 - Fix: recipe stock status now includes inactive parent products in lookups — fixes all ingredients showing red after optimizer runs because parent products (active=0) were excluded from stock aggregation queries
 

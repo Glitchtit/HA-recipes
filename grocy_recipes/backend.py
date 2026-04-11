@@ -1589,10 +1589,15 @@ def _deduplicate_stub_candidates(
                 matched = prod
                 break
 
-        # 2. Substring containment (min 3 chars to avoid false positives)
+        # 2. Substring containment (min 3 chars, word-boundary only to avoid false
+        #    positives like "voi" matching inside "virvoitusjuoma")
         if not matched:
             for pname, prod in product_lookup:
-                if len(ing_name) >= 3 and (ing_name in pname or pname in ing_name):
+                if len(ing_name) < 3:
+                    continue
+                pattern = r"(?<!\w)" + re.escape(ing_name) + r"(?!\w)"
+                pname_pattern = r"(?<!\w)" + re.escape(pname) + r"(?!\w)"
+                if re.search(pattern, pname) or re.search(pname_pattern, ing_name):
                     if not prod.get("parent_id"):
                         matched = prod
                         break
