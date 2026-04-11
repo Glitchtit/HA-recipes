@@ -1,3 +1,12 @@
+## 1.5.19
+- Fix: `_resolve_unit_id("kpl")` now returns the actual kpl unit ID instead of None — directly fixes "1 lemon → 1 g" bug where countable items fell back to the product's default unit (grams)
+- Fix: Stub products now use the ingredient's resolved unit (kpl for countable items) instead of always defaulting to Gramma (g)
+- Fix: `_STANDARD_UNITS` key renamed from legacy `"description"` to `"abbreviation"` matching Storage API field
+- Expanded `_COUNTABLE_KEYWORDS` from 20 to 40+ Finnish countable ingredients (fruits, vegetables, proteins, bread items)
+- Raised `_fix_countable_units` threshold from 24 to 50 for broader safety net coverage
+- Added deduplication safeguard before stub creation: normalized name matching + AI semantic matching against existing products to prevent duplicate stubs
+- Strengthened AI prompts with more countable item examples, negative examples (weight-given items), and edge cases across all three languages
+
 ## 1.5.18
 - Cleanup: removed stale Grocy references from backend docstrings and User-Agent strings
 

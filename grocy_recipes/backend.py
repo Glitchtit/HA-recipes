@@ -352,15 +352,15 @@ def _api_delete(path: str) -> None:
 
 # Standard recipe units with Finnish names
 _STANDARD_UNITS = [
-    {"name": "Gramma", "name_plural": "Grammaa", "description": "g"},
-    {"name": "Kilogramma", "name_plural": "Kilogrammaa", "description": "kg"},
-    {"name": "Millilitra", "name_plural": "Millilitraa", "description": "ml"},
-    {"name": "Desilitra", "name_plural": "Desilitraa", "description": "dl"},
-    {"name": "Litra", "name_plural": "Litraa", "description": "l"},
-    {"name": "Teelusikka", "name_plural": "Teelusikkaa", "description": "tl"},
-    {"name": "Ruokalusikka", "name_plural": "Ruokalusikkaa", "description": "rkl"},
-    {"name": "Ripaus", "name_plural": "Ripausta", "description": "rs"},
-    {"name": "Kappale", "name_plural": "Kappaletta", "description": "kpl"},
+    {"name": "Gramma", "name_plural": "Grammaa", "abbreviation": "g"},
+    {"name": "Kilogramma", "name_plural": "Kilogrammaa", "abbreviation": "kg"},
+    {"name": "Millilitra", "name_plural": "Millilitraa", "abbreviation": "ml"},
+    {"name": "Desilitra", "name_plural": "Desilitraa", "abbreviation": "dl"},
+    {"name": "Litra", "name_plural": "Litraa", "abbreviation": "l"},
+    {"name": "Teelusikka", "name_plural": "Teelusikkaa", "abbreviation": "tl"},
+    {"name": "Ruokalusikka", "name_plural": "Ruokalusikkaa", "abbreviation": "rkl"},
+    {"name": "Ripaus", "name_plural": "Ripausta", "abbreviation": "rs"},
+    {"name": "Kappale", "name_plural": "Kappaletta", "abbreviation": "kpl"},
 ]
 
 # Global conversions between compatible units: (from_abbrev, to_abbrev, factor)
@@ -423,7 +423,7 @@ def _ensure_units_and_conversions() -> dict[str, int]:
         abbrev_to_id: dict[str, int] = {}
 
         for unit_def in _STANDARD_UNITS:
-            abbrev = unit_def["description"]
+            abbrev = unit_def["abbreviation"]
             # Check if unit already exists (by abbreviation or name)
             uid = existing_by_abbrev.get(abbrev.lower())
             if uid is None:
@@ -488,15 +488,14 @@ def _get_unit_map() -> dict[str, int]:
 
 
 def _resolve_unit_id(unit_str: str | None) -> int | None:
-    """Resolve a unit string (e.g. 'dl', 'gram', 'l') to a unit ID.
+    """Resolve a unit string (e.g. 'dl', 'gram', 'kpl') to a unit ID.
 
-    Returns None for count/piece units ('kpl') so the caller falls back
-    to the product's unit_id — which is already the count unit.
+    Returns None only when the unit string is empty or unrecognised.
     """
     if not unit_str:
         return None
     canonical = _UNIT_ALIASES.get(unit_str.lower().strip())
-    if canonical is None or canonical == "kpl":
+    if canonical is None:
         return None
     umap = _get_unit_map()
     return umap.get(canonical)
@@ -1222,7 +1221,8 @@ RULES:
 - "TO TASTE" ingredients: If the source says "to taste", "salta väl", "maun mukaan", "efter smak", "salt and pepper", "season with..." or similar → amount=null, unit=null
 - Unit rules (CRITICAL — follow exactly):
   * If the source already has a unit (dl, ml, l, g, kg, tsk, msk, tbsp, tsp, cup, etc.) → translate it to the Finnish abbreviation (dl, ml, l, g, kg, tl, rkl)
-  * If the source has NO unit and the ingredient is a whole countable item (egg/ägg/kananmuna, onion/lök/sipuli, potato/peruna, clove/vitlöksklyfta, carrot/morot/porkkana, etc.) → unit = "kpl"
+  * If the source has NO unit and the ingredient is a whole countable item → unit = "kpl"
+    Countable items: egg/ägg/kananmuna, onion/lök/sipuli, potato/potatis/peruna, carrot/morot/porkkana, lemon/citron/sitruuna, lime, orange/appelsin/appelsiini, banana/banan/banaani, avocado/avokado, apple/äpple/omena, bell pepper/paprika, tomato/tomat/tomaatti, cucumber/gurka/kurkku, zucchini/kesäkurpitsa, eggplant/aubergine/munakoisio, chicken breast/kananrinta, chicken thigh/kananreisi, steak/pihvi, sausage/makkara, tortilla, bread roll/sämpylä, garlic clove/vitlöksklyfta/valkosipulinkynsi, chili
   * If the source has NO unit and the ingredient is not a countable item (salt, pepper, oil, etc.) → unit = null
   * NEVER invent a weight unit (g/kg) when no unit is given in the source string
 - Note: preparation detail like "hienonnettu", "viipaloitu", or null
@@ -1231,6 +1231,10 @@ RULES:
   "2 ägg (ca 120 g)" → name="kananmuna", amount=2, unit="kpl"
   "3 eggs" → name="kananmuna", amount=3, unit="kpl"
   "1 lök" → name="sipuli", amount=1, unit="kpl"
+  "1 chicken breast" → name="kananrinta", amount=1, unit="kpl"
+  "4 potatisar" → name="peruna", amount=4, unit="kpl"
+  "1 zucchini" → name="kesäkurpitsa", amount=1, unit="kpl"
+  "500 g kyckling" → name="kana", amount=500, unit="g"
   "salt" → name="suola", amount=null, unit=null
   "salta väl" → name="suola", amount=null, unit=null
   "peppar efter smak" → name="pippuri", amount=null, unit=null
@@ -1245,9 +1249,26 @@ RULES:
 
 # Known countable ingredient keywords (Finnish) — never use g/kg for these
 _COUNTABLE_KEYWORDS = {
-    "kananmuna", "muna", "sipuli", "punasipuli", "kevätsipuli", "peruna", "porkkana",
-    "tomaatti", "paprika", "sitruuna", "lime", "appelsiini", "banaani", "avokado",
-    "valkosipuli", "kurkku", "selleri", "lanttu", "palsternakka", "nauris",
+    # Eggs
+    "kananmuna", "muna",
+    # Onions
+    "sipuli", "punasipuli", "kevätsipuli", "salottisipuli",
+    # Root vegetables
+    "peruna", "porkkana", "lanttu", "palsternakka", "nauris", "punajuuri", "bataatti",
+    # Other vegetables
+    "tomaatti", "paprika", "kurkku", "selleri", "kesäkurpitsa", "munakoisio",
+    "chili", "jalapeño", "artisokka",
+    # Fruits & citrus
+    "sitruuna", "lime", "appelsiini", "banaani", "avokado", "omena", "päärynä",
+    "persikka", "mango", "kiivi", "luumu", "greippi", "nektariini",
+    # Garlic
+    "valkosipuli", "valkosipulinkynsi",
+    # Meat pieces
+    "kanankoipi", "kananreisi", "kananrinta", "pihvi", "kyljys", "makkara",
+    # Bread & wraps
+    "sämpylä", "leipä", "tortilla", "pita", "rieskä",
+    # Other countable
+    "kääretorttu", "munkkipossu",
 }
 
 
@@ -1255,7 +1276,7 @@ def _fix_countable_units(ingredients: list[dict]) -> list[dict]:
     """Post-processor: force unit=kpl for countable items when AI returns g/kg with small count.
 
     Prevents "2 kananmuna" being stored as "2 g kananmuna" which is nonsensical.
-    Only triggers when amount <= 24 (larger values are plausible weights).
+    Only triggers when amount <= 50 (larger values are plausible weights).
     """
     for ing in ingredients:
         if not isinstance(ing, dict):
@@ -1263,7 +1284,7 @@ def _fix_countable_units(ingredients: list[dict]) -> list[dict]:
         name = (ing.get("name") or "").lower()
         unit = (ing.get("unit") or "").lower()
         amount = ing.get("amount")
-        if unit in ("g", "kg") and amount is not None and float(amount) <= 24:
+        if unit in ("g", "kg") and amount is not None and float(amount) <= 50:
             if any(kw in name for kw in _COUNTABLE_KEYWORDS):
                 log.info("_fix_countable_units: %s %s %s → kpl", amount, unit, name)
                 ing["unit"] = "kpl"
@@ -1293,7 +1314,9 @@ Instructions:
    Rules for ingredients:
    - REMOVE any parenthetical weight or calorie notes: "2 ägg (ca 120 g)" → write "2 ägg"
    - "To taste" / "salta väl" / "maun mukaan" / "efter smak" → write "to taste <ingredient name>"
-   - Keep amounts and units as written (do not convert or translate)
+   - Keep amounts and units EXACTLY as written in the source — do not convert, translate, or add units
+   - If an ingredient has NO unit written (just a number + item name, e.g. "2 ägg", "1 citron", "3 tomater"), write it EXACTLY as-is without adding any unit. Do NOT insert g, kg, ml, dl, or any other unit.
+   - Examples: "2 ägg" → "2 ägg" (NOT "2 st ägg"), "1 citron" → "1 citron" (NOT "1 g citron")
 4. List the cooking steps numbered 1, 2, 3...
 
 Write ONLY the clean recipe. No extra commentary, no markdown formatting."""
@@ -1336,12 +1359,19 @@ CRITICAL LANGUAGE RULES:
   → set amount=null and unit=null for that ingredient
   Example: "to taste salt" → {{"name": "suola", "amount": null, "unit": null}}
 
-UNIT RULES (CRITICAL):
+UNIT RULES (CRITICAL — follow these exactly):
 - If the source already has a unit (dl, ml, l, g, kg, tsk, msk, tbsp, tsp, cup) → translate to Finnish abbreviation (dl, ml, l, g, kg, tl, rkl)
-- If NO unit and ingredient is a whole countable item (egg/ägg/kananmuna, onion/sipuli, potato/peruna, carrot/porkkana, etc.) → unit = "kpl"
-- If NO unit and ingredient is not countable (salt, pepper, oil) → unit = null
+- If NO unit and ingredient is a whole countable item → unit = "kpl"
+  Countable items include: eggs, onions, potatoes, carrots, lemons, limes, oranges, bananas, avocados, apples, pears, bell peppers, tomatoes, cucumbers, zucchini, eggplants, chicken breasts/thighs/legs, steaks, sausages, tortillas, bread rolls, garlic cloves, chili peppers
+- If NO unit and ingredient is not countable (salt, pepper, oil, butter, flour, sugar, etc.) → unit = null
 - NEVER invent a weight (g/kg) when no unit appears in the source line
-- Examples: "2 ägg" → unit="kpl" | "3 eggs" → unit="kpl" | "1 lök" → unit="kpl" | "salt" → unit=null
+- Examples:
+  "2 ägg" → unit="kpl"  |  "3 eggs" → unit="kpl"  |  "1 lök" → unit="kpl"
+  "1 chicken breast" → unit="kpl"  |  "4 potatis" → unit="kpl"
+  "1 zucchini" → unit="kpl"  |  "2 tortillas" → unit="kpl"
+  "500 g chicken" → unit="g" (weight given — NOT kpl)
+  "2 dl cream" → unit="dl" (volume given — NOT kpl)
+  "salt" → unit=null  |  "pepper to taste" → unit=null
 
 - Do NOT include any text outside the JSON object"""
 
@@ -1524,6 +1554,113 @@ MATCHING RULES:
     return ingredients
 
 
+def _deduplicate_stub_candidates(
+    unmatched: list[dict],
+    all_products: list[dict],
+    group_masters: list[dict] | None = None,
+) -> list[dict]:
+    """Match unmatched ingredients to existing products via normalized/fuzzy matching.
+
+    Runs a broader matching pass than _match_ingredient (which only does exact name match
+    on Group masters).  This catches substring containment and case variations across ALL
+    products, then uses AI as a final check for semantic duplicates.
+
+    Returns *unmatched* with ``_product_id`` set where a match is found.
+    """
+    if not unmatched or not all_products:
+        return unmatched
+
+    product_lookup: list[tuple[str, dict]] = [
+        (p["name"].lower().strip(), p) for p in all_products
+    ]
+
+    still_need_ai: list[dict] = []
+
+    for ing in unmatched:
+        if ing.get("_product_id") is not None:
+            continue
+        ing_name = ing["name"].lower().strip()
+
+        matched: dict | None = None
+
+        # 1. Exact normalized match against ALL products
+        for pname, prod in product_lookup:
+            if pname == ing_name:
+                matched = prod
+                break
+
+        # 2. Substring containment (min 3 chars to avoid false positives)
+        if not matched:
+            for pname, prod in product_lookup:
+                if len(ing_name) >= 3 and (ing_name in pname or pname in ing_name):
+                    if not prod.get("parent_id"):
+                        matched = prod
+                        break
+
+        # Climb to parent if a child was matched
+        if matched and matched.get("parent_id"):
+            parent = next(
+                (p for p in all_products if p["id"] == int(matched["parent_id"])),
+                None,
+            )
+            if parent:
+                matched = parent
+
+        if matched:
+            ing["_product_id"] = matched["id"]
+            log.info(
+                "Dedup matched '%s' → '%s' (ID %d)",
+                ing["name"], matched["name"], matched["id"],
+            )
+        else:
+            still_need_ai.append(ing)
+
+    # 3. AI semantic dedup for remaining candidates
+    if still_need_ai and group_masters:
+        parent_names = [{"id": p["id"], "name": p["name"]} for p in group_masters]
+        if parent_names:
+            candidate_list = json.dumps(
+                [{"index": i, "name": ing["name"]} for i, ing in enumerate(still_need_ai)],
+                ensure_ascii=False,
+            )
+            parent_list = json.dumps(parent_names[:500], ensure_ascii=False)
+
+            prompt = f"""Check if any of these candidate ingredient names are duplicates of existing products.
+
+Candidate ingredients (about to be created as new products):
+{candidate_list}
+
+Existing parent products in the system:
+{parent_list}
+
+For each candidate, check if an existing product already represents the SAME ingredient.
+Consider: singular/plural forms, spelling variations, abbreviations, and synonyms.
+
+Return a JSON array:
+[{{"index": 0, "product_id": <matched existing product ID or null>, "reason": "brief explanation"}}]
+
+RULES:
+- Only match when confident they represent the SAME ingredient
+- "sitruuna" and "Sitruuna" → MATCH (case)
+- "valkosipulinkynsi" and "Valkosipuli" → MATCH (clove of garlic IS garlic)
+- "kanafilee" and "Kana" → MATCH (chicken fillet IS chicken)
+- Do NOT match unrelated items even if names partially overlap"""
+
+            result = _call_ai_json(prompt)
+            if result and isinstance(result, list):
+                for match in result:
+                    idx = match.get("index")
+                    pid = match.get("product_id")
+                    if idx is not None and pid is not None and 0 <= idx < len(still_need_ai):
+                        still_need_ai[idx]["_product_id"] = int(pid)
+                        log.info(
+                            "AI dedup matched '%s' → product ID %d (%s)",
+                            still_need_ai[idx]["name"], pid, match.get("reason", ""),
+                        )
+
+    return unmatched
+
+
 # ---------------------------------------------------------------------------
 # Recipe CRUD
 # ---------------------------------------------------------------------------
@@ -1586,7 +1723,7 @@ def _create_recipe(recipe_data: dict, matched_ingredients: list[dict]) -> dict:
         # Resolve recipe unit to a unit ID
         recipe_unit_id = _resolve_unit_id(ing.get("unit"))
         if recipe_unit_id is None:
-            # Count items or unknown units — use product's unit_id
+            # No unit specified (e.g. "to taste" items) — use product's default
             recipe_unit_id = prod.get("unit_id") or 1
 
         note_parts = []
@@ -1994,26 +2131,29 @@ def _handle_scrape(url: str) -> dict:
         i for i in recipe_data.get("ingredients", [])
         if i.get("_product_id") is None
     ]
+
+    # 6a. Deduplication pass — try normalized + AI matching before creating stubs
     if still_unmatched:
-        # Look up valid unit and location IDs
-        default_unit_id = None
+        _deduplicate_stub_candidates(
+            still_unmatched, products, group_masters=group_master_products,
+        )
+        still_unmatched = [i for i in still_unmatched if i.get("_product_id") is None]
+
+    if still_unmatched:
+        # Look up valid location ID (unit resolved per-ingredient below)
         default_loc_id = None
-        try:
-            units = _api_get("units")
-            if units:
-                default_unit_id = units[0]["id"]
-        except Exception:
-            pass
         try:
             locs = _api_get("locations")
             if locs:
                 default_loc_id = locs[0]["id"]
         except Exception:
             pass
+        umap = _get_unit_map()
+        default_unit_id = umap.get("g") or 1
 
-        if default_unit_id is None or default_loc_id is None:
+        if default_loc_id is None:
             log.warning(
-                "Cannot create stub products — no units or locations in Storage"
+                "Cannot create stub products — no locations in Storage"
             )
         else:
             # Reuse group_master_id resolved above; create the group only if
@@ -2032,11 +2172,13 @@ def _handle_scrape(url: str) -> dict:
                     stub_name,
                 )
                 try:
+                    # Resolve the ingredient's unit for the stub product
+                    ing_unit_id = _resolve_unit_id(ing.get("unit"))
                     stub_body: dict = {
                         "name": stub_name,
                         "description": "Auto-created by recipe scraper",
                         "location_id": default_loc_id,
-                        "unit_id": default_unit_id,
+                        "unit_id": ing_unit_id or default_unit_id,
                         "default_best_before_days": 0,
                         "active": False,
                         "min_stock_amount": 0,
@@ -2049,8 +2191,8 @@ def _handle_scrape(url: str) -> dict:
                         ing["_product_id"] = int(new_id)
                         stub_product_ids.add(int(new_id))
                         log.debug(
-                            "Created stub parent product '%s' (ID %s, group master)",
-                            stub_name, new_id,
+                            "Created stub parent product '%s' (ID %s, unit_id=%s, group master)",
+                            stub_name, new_id, ing_unit_id or default_unit_id,
                         )
                 except Exception as exc:
                     log.warning("Failed to create stub product '%s': %s", stub_name, exc)
