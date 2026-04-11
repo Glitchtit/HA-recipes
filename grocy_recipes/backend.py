@@ -2263,7 +2263,18 @@ class _Handler(BaseHTTPRequestHandler):
         path = self.path.rstrip("/")
 
         if path in ("/api/config", "api/config"):
-            return self._json({"configured": bool(STORAGE_URL and GEMINI_KEY)})
+            # Provider-aware readiness check
+            ai_ready = False
+            if AI_PROVIDER == "ollama":
+                ai_ready = bool(OLLAMA_URL)
+            elif AI_PROVIDER == "claude":
+                ai_ready = bool(CLAUDE_API_KEY)
+            else:
+                ai_ready = bool(GEMINI_KEY)
+            return self._json({
+                "configured": bool(STORAGE_URL and ai_ready),
+                "ai_provider": AI_PROVIDER,
+            })
 
         if path == "/api/recipes":
             try:

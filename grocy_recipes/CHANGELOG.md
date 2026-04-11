@@ -1,3 +1,8 @@
+## 1.5.20
+- Fix: `/api/config` readiness check now provider-aware — correctly reports configured status for Ollama and Claude (was wrongly checking GEMINI_KEY for all providers)
+- Stability: Storage health check now caps at 60 retries with degraded-state UI and manual retry button instead of silent infinite loop
+- Stability: nginx proxy timeouts standardised — Storage API 120s read / 10s connect, file proxy 30s, scraper 120s, all with explicit connect timeouts
+
 ## 1.5.19
 - Fix: `_resolve_unit_id("kpl")` now returns the actual kpl unit ID instead of None — directly fixes "1 lemon → 1 g" bug where countable items fell back to the product's default unit (grams)
 - Fix: Stub products now use the ingredient's resolved unit (kpl for countable items) instead of always defaulting to Gramma (g)

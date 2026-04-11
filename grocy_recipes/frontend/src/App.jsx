@@ -300,6 +300,9 @@ function DeleteConfirmDialog({ recipeName, onConfirm, onClose }) {
 // ---------------------------------------------------------------------------
 export default function App() {
   const [storageReady, setStorageReady] = useState(false);
+  const [storageChecking, setStorageChecking] = useState(true);
+  const [healthRetries, setHealthRetries] = useState(0);
+  const MAX_HEALTH_RETRIES = 60;
   const [recipes, setRecipes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [scraping, setScraping] = useState(false);
@@ -332,15 +335,25 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     let timer;
+    let retryCount = 0;
     const check = async () => {
       try {
         const { data } = await axios.get(`${API_STORAGE}/health`, { timeout: 5000 });
         if (!cancelled && data && data.version) {
           setStorageReady(true);
+          setStorageChecking(false);
           return;
         }
       } catch { /* retry */ }
-      if (!cancelled) timer = setTimeout(check, 5000);
+      retryCount++;
+      if (!cancelled) {
+        setHealthRetries(retryCount);
+        if (retryCount < MAX_HEALTH_RETRIES) {
+          timer = setTimeout(check, 5000);
+        } else {
+          setStorageChecking(false);
+        }
+      }
     };
     check();
     return () => { cancelled = true; clearTimeout(timer); };
@@ -495,7 +508,7 @@ export default function App() {
   }, [deleteDialog, addToast, closeDetail, loadRecipes]);
 
   // ── Render ────────────────────────────────────────────────────────
-  if (!storageReady) {
+  if (!storageReady && storageChecking) {
     return (
       <div className="min-h-screen bg-gray-900 text-gray-100 flex flex-col items-center justify-center gap-4">
         <svg className="animate-spin h-8 w-8 text-emerald-400" viewBox="0 0 24 24">
@@ -503,6 +516,26 @@ export default function App() {
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
         <p className="text-gray-400 text-sm">Odotetaan Storage-lisäosaa…</p>
+        {healthRetries > 3 && (
+          <p className="text-gray-500 text-xs">Yritys {healthRetries}…</p>
+        )}
+      </div>
+    );
+  }
+
+  if (!storageReady && !storageChecking) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-gray-100 flex flex-col items-center justify-center gap-4">
+        <p className="text-red-400 text-lg">⚠️ Storage ei tavoitettavissa</p>
+        <p className="text-gray-400 text-sm">
+          Yhteyden muodostaminen epäonnistui {healthRetries} yrityksen jälkeen.
+        </p>
+        <button
+          onClick={() => window.location.reload()}
+          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm"
+        >
+          Yritä uudelleen
+        </button>
       </div>
     );
   }
