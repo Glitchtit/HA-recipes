@@ -1798,8 +1798,10 @@ def _get_recipe_detail(recipe_id: int) -> dict:
     for s in stock:
         stock_by_product[s["product_id"]] = s
 
-    # Get all products for parent lookups
-    products_list = _api_get("products")
+    # Get all products for parent lookups (include inactive parents so
+    # recipe ingredients pointing to inactive group-master parents can be
+    # resolved for unit info and stock aggregation).
+    products_list = _api_get("products?active_only=false")
     products_by_id = {p["id"]: p for p in products_list}
 
     # Get all conversions for stock comparison

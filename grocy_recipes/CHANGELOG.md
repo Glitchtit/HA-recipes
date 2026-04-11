@@ -1,3 +1,6 @@
+## 1.5.21
+- Fix: recipe stock status now includes inactive parent products in lookups — fixes all ingredients showing red after optimizer runs because parent products (active=0) were excluded from stock aggregation queries
+
 ## 1.5.20
 - Fix: `/api/config` readiness check now provider-aware — correctly reports configured status for Ollama and Claude (was wrongly checking GEMINI_KEY for all providers)
 - Stability: Storage health check now caps at 60 retries with degraded-state UI and manual retry button instead of silent infinite loop
