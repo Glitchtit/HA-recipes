@@ -1739,7 +1739,7 @@ def _create_recipe(recipe_data: dict, matched_ingredients: list[dict]) -> dict:
 
         ingredients.append({
             "product_id": pid,
-            "amount": ing.get("amount") if ing.get("amount") is not None else 0,
+            "amount": float(ing.get("amount") or 0),
             "unit_id": recipe_unit_id,
             "note": " — ".join(note_parts) if note_parts else "",
             "sort_order": idx,
@@ -1753,8 +1753,8 @@ def _create_recipe(recipe_data: dict, matched_ingredients: list[dict]) -> dict:
     recipe_body = {
         "name": recipe_data["name"],
         "description": description,
-        "servings": recipe_data.get("servings", 4),
-        "source_url": recipe_data.get("source_url", ""),
+        "servings": float(recipe_data.get("servings") or 4),
+        "source_url": recipe_data.get("source_url") or "",
         "ingredients": ingredients,
     }
 

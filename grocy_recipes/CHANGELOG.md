@@ -1,3 +1,6 @@
+## 1.5.24
+- Fix: 422 error on recipe POST caused by AI returning `null` for `servings` — key exists with value `None` so `.get("servings", 4)` didn't fall back; now uses `or 4` coercion. Same guard added for ingredient `amount`.
+
 ## 1.5.23
 - Fix: recipe instructions now rendered as a numbered list — each step is a separate line item instead of all steps joined into one unreadable text blob
 
