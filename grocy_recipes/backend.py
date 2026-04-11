@@ -1,7 +1,7 @@
-"""Grocy Recipes — Python backend server.
+"""HA Grocy Recipes — Python backend server.
 
 Handles recipe scraping via Gemini AI, product matching against Storage,
-missing-product discovery via grocy-scraper, and recipe CRUD.
+missing-product discovery via the scraper addon, and recipe CRUD.
 """
 
 from __future__ import annotations
@@ -991,7 +991,7 @@ def _convert_recipe_to_stock(
 # Scraper proxy
 # ---------------------------------------------------------------------------
 def _scraper_available() -> bool:
-    """Check if grocy-scraper addon is reachable (via nginx proxy)."""
+    """Check if the scraper addon is reachable (via nginx proxy)."""
     try:
         r = requests.get(f"http://127.0.0.1:8099/api/scraper/config", timeout=3)
         return r.ok
@@ -1068,7 +1068,7 @@ Rules:
 
 
 def _scraper_discover(product_name: str, search_term: str | None = None) -> dict | None:
-    """Ask grocy-scraper to find and create a product by name search.
+    """Ask the scraper addon to find and create a product by name search.
 
     If *search_term* is provided it is used directly; otherwise the ingredient
     name is translated to Finnish via a Gemini call first.
@@ -1115,7 +1115,7 @@ def _scraper_discover(product_name: str, search_term: str | None = None) -> dict
 def _fetch_page(url: str) -> str:
     """Fetch a web page and return cleaned text content."""
     r = requests.get(url, timeout=15, headers={
-        "User-Agent": "Mozilla/5.0 (compatible; GrocyRecipes/1.0)"
+        "User-Agent": "Mozilla/5.0 (compatible; RecipeBackend/1.0)"
     })
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
@@ -1130,7 +1130,7 @@ def _extract_image_url(url: str, html: str | None = None) -> str | None:
     try:
         if html is None:
             r = requests.get(url, timeout=10, headers={
-                "User-Agent": "Mozilla/5.0 (compatible; GrocyRecipes/1.0)"
+                "User-Agent": "Mozilla/5.0 (compatible; RecipeBackend/1.0)"
             })
             html = r.text
         soup = BeautifulSoup(html, "html.parser")
@@ -1370,7 +1370,7 @@ def _scrape_recipe(url: str) -> dict:
     Returns: {name, image_url, servings, source_url, ingredients: [{name, amount, unit, note}], instructions: [str]}
     """
     r = requests.get(url, timeout=15, headers={
-        "User-Agent": "Mozilla/5.0 (compatible; GrocyRecipes/1.0)"
+        "User-Agent": "Mozilla/5.0 (compatible; RecipeBackend/1.0)"
     })
     r.raise_for_status()
     raw_html = r.text
@@ -1457,7 +1457,7 @@ def _ai_match_ingredients(
     products: list[dict],
     group_masters: list[dict] | None = None,
 ) -> list[dict]:
-    """Use Gemini AI to match ingredients to Grocy products when simple matching fails."""
+    """Use Gemini AI to match ingredients to Storage products when simple matching fails."""
     unmatched = [i for i in ingredients if i.get("_product_id") is None]
     if not unmatched:
         return ingredients
@@ -1525,14 +1525,14 @@ MATCHING RULES:
 
 
 # ---------------------------------------------------------------------------
-# Recipe CRUD in Grocy
+# Recipe CRUD
 # ---------------------------------------------------------------------------
 def _upload_recipe_image(recipe_id: int, image_url: str, old_filename: str | None = None) -> str | None:
     """Download image from URL and upload to Storage."""
     try:
         log.debug("Downloading recipe image from: %s", image_url)
         r = requests.get(image_url, timeout=15, headers={
-            "User-Agent": "Mozilla/5.0 (compatible; GrocyRecipes/1.0)"
+            "User-Agent": "Mozilla/5.0 (compatible; RecipeBackend/1.0)"
         })
         r.raise_for_status()
         content_type = r.headers.get("Content-Type", "")

@@ -1,3 +1,6 @@
+## 1.5.18
+- Cleanup: removed stale Grocy references from backend docstrings and User-Agent strings
+
 ## 1.5.17
 - All recipes now use the two-step summarize→extract pipeline regardless of JSON-LD — eliminates remaining cases where JSON-LD ingredient strings with parenthetical annotations (e.g. "2 ägg (ca 120 g)") caused wrong units
 
