@@ -1,3 +1,6 @@
+## 1.5.26
+- `ai_provider` schema changed to dropdown (list) — renders as radio buttons in HA add-on options instead of free text
+
 ## 1.5.25
 - Apply GlitchyRee design system: brand-orange recipe card hover/selected, cobalt primary "Hae" fetch and "Lisää ostoslistalle" buttons
 - Add CSS design tokens at src/styles/design-tokens.css
