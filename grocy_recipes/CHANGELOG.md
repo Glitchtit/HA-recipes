@@ -1,3 +1,9 @@
+## 1.5.25
+- Apply GlitchyRee design system: brand-orange recipe card hover/selected, cobalt primary "Hae" fetch and "Lisää ostoslistalle" buttons
+- Add CSS design tokens at src/styles/design-tokens.css
+- Self-hosted Space Grotesk / Inter / JetBrains Mono fonts
+- Wire Tailwind theme.extend to expose brand.* / semantic.* / font-display utilities
+
 ## 1.5.24
 - Fix: 422 error on recipe POST caused by AI returning `null` for `servings` — key exists with value `None` so `.get("servings", 4)` didn't fall back; now uses `or 4` coercion. Same guard added for ingredient `amount`.
 

@@ -50,7 +50,7 @@ function RecipeCard({ recipe, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="bg-gray-800 rounded-2xl shadow-lg overflow-hidden text-left hover:ring-2 hover:ring-emerald-400 transition-all active:scale-[0.98]"
+      className="bg-gray-800 rounded-2xl shadow-lg overflow-hidden text-left hover:ring-2 hover:ring-brand-orange transition-all active:scale-[0.98]"
     >
       <div className="aspect-video bg-gray-700 relative overflow-hidden">
         {imgUrl ? (
@@ -152,7 +152,7 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onDelete }) {
                 key={ing.id}
                 className={`text-sm px-3 py-2 rounded-lg ${
                   ing.status === 'green'
-                    ? 'bg-emerald-900/40 text-emerald-300'
+                    ? 'bg-brand-orange text-white'
                     : ing.status === 'yellow'
                       ? 'bg-amber-900/40 text-amber-300'
                       : 'bg-red-900/40 text-red-300'
@@ -187,7 +187,7 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onDelete }) {
         <div className="px-6 pb-6 space-y-2">
           <button
             onClick={() => onAddToShoppingList(hasOpened)}
-            className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 transition-colors"
+            className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-brand-cobalt hover:bg-brand-cobalt-400 active:bg-brand-cobalt-600 transition-colors"
           >
             Lisää ostoslistalle
           </button>
@@ -239,7 +239,7 @@ function ShoppingListDialog({ hasOpened, onSelect, onClose }) {
           )}
           <button
             onClick={() => onSelect('all')}
-            className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 transition-colors"
+            className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-brand-cobalt hover:bg-brand-cobalt-400 active:bg-brand-cobalt-600 transition-colors"
           >
             Kaikki ainekset
           </button>
@@ -559,7 +559,7 @@ export default function App() {
           <button
             onClick={handleScrape}
             disabled={scraping || !url.trim()}
-            className="px-5 py-2.5 rounded-xl font-semibold text-white text-sm bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 transition-colors disabled:opacity-40"
+            className="px-5 py-2.5 rounded-xl font-semibold text-white text-sm bg-brand-cobalt hover:bg-brand-cobalt-400 active:bg-brand-cobalt-600 transition-colors disabled:opacity-40"
           >
             {scraping ? (
               <span className="inline-flex items-center gap-2">
