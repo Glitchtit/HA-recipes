@@ -2,13 +2,13 @@
 
 ## Project Overview
 
-**Recipe** is a Home Assistant add-on for AI-powered recipe scraping. Users paste a recipe URL, Gemini AI extracts the recipe, and ingredients are matched to products in **HA-Storage** (the Storage addon, NOT Grocy). The add-on slug is `grocy_recipes` (legacy name).
+**Recipe** is a Home Assistant add-on for AI-powered recipe scraping. Users paste a recipe URL, Gemini AI extracts the recipe, and ingredients are matched to products in **HA-Storage**. The add-on slug is `recipes`.
 
 ## Architecture
 
 Two s6-overlay services:
 
-1. **grocy-recipes** (nginx on port 8099) — serves the React SPA and proxies API requests.
+1. **recipes** (nginx on port 8099) — serves the React SPA and proxies API requests.
 2. **recipe-backend** (Python on port 8100) — handles recipe scraping, product matching, and Storage CRUD.
 
 Request flow: **HA Ingress → nginx (port 8099) → React SPA / API proxies**.
@@ -39,7 +39,7 @@ The Dockerfile is a **multi-stage build**: Node 20 builds the React frontend, th
 
 ## Development
 
-Frontend commands run from `grocy_recipes/frontend/`:
+Frontend commands run from `recipes/frontend/`:
 
 ```bash
 npm install        # install dependencies
@@ -64,7 +64,7 @@ There is no test suite, linter, or formatter configured.
 
 ## HA Add-on Structure
 
-- The add-on lives in `grocy_recipes/`, matching the slug in `config.json`.
+- The add-on lives in `recipes/`, matching the slug in `config.json`.
 - `config.json` defines add-on metadata, options schema, and ingress settings.
 - `build.json` maps architectures to HA base images for multi-arch Docker builds.
 
@@ -74,7 +74,7 @@ When making user-facing changes, **both files must be updated together**:
 
 | File | Field |
 |---|---|
-| `grocy_recipes/config.json` | `"version": "X.Y.Z"` |
-| `grocy_recipes/CHANGELOG.md` | New `## X.Y.Z` section |
+| `recipes/config.json` | `"version": "X.Y.Z"` |
+| `recipes/CHANGELOG.md` | New `## X.Y.Z` section |
 
 CHANGELOG format: plain `## x.y.z` headers (no `v` prefix), flat bullet list, no dates, no category sub-headers. Newest version first.

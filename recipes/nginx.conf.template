@@ -50,7 +50,7 @@ http {
             proxy_send_timeout    60s;
         }
 
-        # ── Grocy Scraper proxy ───────────────────────────────────────────
+        # ── Scraper proxy ───────────────────────────────────────────
         location ^~ /api/scraper/ {
             proxy_pass         ${SCRAPER_URL}/api/;
             proxy_set_header   Host              $http_host;

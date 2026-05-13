@@ -21,7 +21,7 @@ else
 
     if [ -n "${MY_HOSTNAME}" ]; then
         MY_HOSTNAME_NORM=$(echo "${MY_HOSTNAME}" | tr '_' '-')
-        REPO_PREFIX="${MY_HOSTNAME_NORM%%-grocy-recipes}"
+        REPO_PREFIX="${MY_HOSTNAME_NORM%%-recipes}"
         if [ "${REPO_PREFIX}" != "${MY_HOSTNAME_NORM}" ] && [ -n "${REPO_PREFIX}" ]; then
             for CANDIDATE in "${REPO_PREFIX}-ha-storage" "${REPO_PREFIX}_ha_storage"; do
                 if curl -sf --max-time 3 "http://${CANDIDATE}:8099/api/products" >/dev/null 2>&1; then
@@ -69,7 +69,7 @@ else
         for _attempt in $(seq 1 20); do
             sleep 5
             MY_HOSTNAME_NORM=$(echo "${MY_HOSTNAME:-}" | tr '_' '-')
-            REPO_PREFIX="${MY_HOSTNAME_NORM%%-grocy-recipes}"
+            REPO_PREFIX="${MY_HOSTNAME_NORM%%-recipes}"
             for _c in "${REPO_PREFIX}-ha-storage" "${REPO_PREFIX}_ha_storage"; do
                 if curl -sf --max-time 3 "http://${_c}:8099/api/products" >/dev/null 2>&1; then
                     STORAGE_URL="http://${_c}:8099"

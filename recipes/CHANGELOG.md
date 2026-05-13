@@ -1,3 +1,10 @@
+## 2.0.0
+- **BREAKING**: dropped all "grocy" naming. Add-on slug `grocy_recipes` → `recipes`. Existing installations must be **uninstalled and reinstalled** — HA treats the renamed slug as a new add-on
+- Repo renamed from `HA-grocy-recipes` to `HA-recipes` on GitHub (old URL still 301-redirects)
+- Internal: inner dir `grocy_recipes/` → `recipes/`, s6 service dirs `grocy-recipes` → `recipes`, scraper auto-discovery now looks up `${REPO_PREFIX}-scraper` (matches the renamed HA-scraper 2.0.0)
+- Docs: copilot-instructions cleaned of vestigial Grocy mentions
+- Requires HA-scraper 2.0.0 (or compatible) for scraper proxying
+
 ## 1.6.0
 - Feat: new "🍳 Tee resepti" button on recipe detail. Asks for servings, then deducts the matching ingredients from HA-Storage stock (FIFO) and queues any shortfall on the shopping list with a "Reseptistä: <name>" note
 - Feat: result toast summarises what was deducted, what landed on the shopping list, and any ingredients with no unit-conversion path (so they can be fixed manually)

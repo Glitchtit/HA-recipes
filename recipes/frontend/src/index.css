@@ -3,7 +3,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Overlay enter animations (matching HA-grocy-stock) */
+/* Overlay enter animations (matching HA-stock) */
 .overlay-enter {
   animation: overlay-fade-in 0.2s ease-out;
 }

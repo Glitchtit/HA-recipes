@@ -1,4 +1,4 @@
-"""HA Grocy Recipes — Python backend server.
+"""HA Recipes — Python backend server.
 
 Handles recipe scraping via Gemini AI, product matching against Storage,
 missing-product discovery via the scraper addon, and recipe CRUD.
