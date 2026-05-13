@@ -1,3 +1,8 @@
+## 1.6.0
+- Feat: new "🍳 Tee resepti" button on recipe detail. Asks for servings, then deducts the matching ingredients from HA-Storage stock (FIFO) and queues any shortfall on the shopping list with a "Reseptistä: <name>" note
+- Feat: result toast summarises what was deducted, what landed on the shopping list, and any ingredients with no unit-conversion path (so they can be fixed manually)
+- Internal: requires HA-Storage 0.8.0 (new `POST /api/recipes/{id}/cook`). Calls HA-Storage directly — no Recipes backend changes
+
 ## 1.5.26
 - `ai_provider` schema changed to dropdown (list) — renders as radio buttons in HA add-on options instead of free text
 

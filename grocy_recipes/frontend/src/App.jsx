@@ -81,7 +81,7 @@ function RecipeCard({ recipe, onClick }) {
 // ---------------------------------------------------------------------------
 // RecipeDetail — full-screen overlay
 // ---------------------------------------------------------------------------
-function RecipeDetail({ recipe, onClose, onAddToShoppingList, onDelete }) {
+function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete }) {
   if (!recipe) return null;
 
   const imgUrl = recipeImageUrl(recipe.picture_filename);
@@ -186,6 +186,12 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onDelete }) {
         {/* Action buttons */}
         <div className="px-6 pb-6 space-y-2">
           <button
+            onClick={() => onCook?.()}
+            className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 transition-colors"
+          >
+            🍳 Tee resepti (vähennä varastosta)
+          </button>
+          <button
             onClick={() => onAddToShoppingList(hasOpened)}
             className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-brand-cobalt hover:bg-brand-cobalt-400 active:bg-brand-cobalt-600 transition-colors"
           >
@@ -246,6 +252,59 @@ function ShoppingListDialog({ hasOpened, onSelect, onClose }) {
           <button
             onClick={onClose}
             className="w-full py-2 rounded-xl font-semibold text-gray-400 text-sm hover:text-gray-200 transition-colors"
+          >
+            Peruuta
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CookDialog
+// Asks the user how many servings to cook, then fires /recipes/:id/cook.
+// ---------------------------------------------------------------------------
+function CookDialog({ recipe, onConfirm, onClose, busy }) {
+  const defaultServings = recipe?.servings || 4;
+  const [servings, setServings] = useState(String(defaultServings));
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm overlay-enter"
+      onClick={onClose}
+    >
+      <div
+        className="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-xs mx-4 p-6 overlay-card-enter"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-lg font-bold text-gray-100 text-center mb-1">
+          Tee resepti
+        </h3>
+        <p className="text-gray-400 text-sm text-center mb-5">
+          Vähennä aineet varastosta — puuttuvat lisätään ostoslistalle.
+        </p>
+        <label className="block text-sm text-gray-300 mb-1">Annoksia</label>
+        <input
+          type="number"
+          value={servings}
+          onChange={(e) => setServings(e.target.value)}
+          min="0.5"
+          step="0.5"
+          className="w-full px-3 py-2 mb-4 bg-gray-900 border border-gray-700 rounded-lg text-white"
+        />
+        <div className="space-y-2">
+          <button
+            onClick={() => onConfirm(Number(servings) || defaultServings)}
+            disabled={busy}
+            className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:bg-gray-700 transition-colors"
+          >
+            {busy ? 'Vähennetään…' : 'Vahvista'}
+          </button>
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="w-full py-2 rounded-xl font-semibold text-gray-400 text-sm hover:text-gray-200 disabled:opacity-50 transition-colors"
           >
             Peruuta
           </button>
@@ -318,6 +377,8 @@ export default function App() {
 
   // Dialogs
   const [shoppingDialog, setShoppingDialog] = useState(null); // {hasOpened: bool}
+  const [cookDialog, setCookDialog] = useState(null); // recipe object when open
+  const [cookBusy, setCookBusy] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState(null); // {id, name}
 
   // ── Toast helper ──────────────────────────────────────────────────
@@ -486,6 +547,43 @@ export default function App() {
     [selectedRecipeId, addToast],
   );
 
+  // ── Cook recipe (deduct from stock) ───────────────────────────────
+  const handleCookClick = useCallback(() => {
+    if (!recipeDetail) return;
+    setCookDialog(recipeDetail);
+  }, [recipeDetail]);
+
+  const handleCookConfirm = useCallback(
+    async (servings) => {
+      if (!cookDialog) return;
+      setCookBusy(true);
+      try {
+        const { data } = await axios.post(
+          `${API_STORAGE}/recipes/${cookDialog.id}/cook`,
+          { servings },
+        );
+        const deducted = data?.deducted?.length || 0;
+        const shortfall = data?.shortfall_added?.length || 0;
+        const unmatched = data?.unmatched?.length || 0;
+        const parts = [];
+        if (deducted) parts.push(`${deducted} vähennetty`);
+        if (shortfall) parts.push(`${shortfall} ostoslistalle`);
+        if (unmatched) parts.push(`${unmatched} muunnos puuttuu`);
+        addToast(
+          parts.length ? `🍳 ${parts.join(', ')}` : 'Resepti tehty',
+          unmatched ? 'error' : 'success',
+        );
+        setCookDialog(null);
+      } catch (err) {
+        const detail = err?.response?.data?.detail ?? err.message;
+        addToast(`Reseptin teko epäonnistui: ${detail}`, 'error');
+      } finally {
+        setCookBusy(false);
+      }
+    },
+    [cookDialog, addToast],
+  );
+
   // ── Delete recipe ─────────────────────────────────────────────────
   const handleDeleteClick = useCallback(() => {
     if (!recipeDetail) return;
@@ -633,6 +731,7 @@ export default function App() {
           recipe={recipeDetail}
           onClose={closeDetail}
           onAddToShoppingList={handleAddToShoppingList}
+          onCook={handleCookClick}
           onDelete={handleDeleteClick}
         />
       )}
@@ -650,6 +749,16 @@ export default function App() {
           hasOpened={shoppingDialog.hasOpened}
           onSelect={handleShoppingSelect}
           onClose={() => setShoppingDialog(null)}
+        />
+      )}
+
+      {/* Cook dialog */}
+      {cookDialog && (
+        <CookDialog
+          recipe={cookDialog}
+          busy={cookBusy}
+          onConfirm={handleCookConfirm}
+          onClose={() => !cookBusy && setCookDialog(null)}
         />
       )}
 
