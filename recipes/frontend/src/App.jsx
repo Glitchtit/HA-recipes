@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import WhatsNewModal from './components/WhatsNewModal';
 
 // ---------------------------------------------------------------------------
 // Ingress-path awareness
@@ -639,6 +640,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100">
+      <WhatsNewModal />
       {/* Header */}
       <header className="sticky top-0 z-30 bg-gray-900/90 backdrop-blur-md border-b border-gray-800 px-4 py-3">
         <h1 className="text-lg font-bold text-center mb-3">🍽️ Recipe</h1>

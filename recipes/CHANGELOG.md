@@ -1,3 +1,6 @@
+## 2.0.1
+- Add **"What's new"** popup — when you open Recipe after an update, a dismissable modal shows the changelog entries for every version released since your last visit. Markers persist per-browser via `localStorage` (`recipes_whatsnew_lastSeen`); first visit silently marks the current version as seen so users don't get a wall of historical changelog on first install
+
 ## 2.0.0
 - **BREAKING**: dropped all "grocy" naming. Add-on slug `grocy_recipes` → `recipes`. Existing installations must be **uninstalled and reinstalled** — HA treats the renamed slug as a new add-on
 - Repo renamed from `HA-grocy-recipes` to `HA-recipes` on GitHub (old URL still 301-redirects)
