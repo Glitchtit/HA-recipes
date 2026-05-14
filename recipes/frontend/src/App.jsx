@@ -10,6 +10,24 @@ const INGRESS_PATH =
 
 const API_BACKEND = `${INGRESS_PATH}/api/backend`;
 const API_STORAGE = `${INGRESS_PATH}/api/storage`;
+const API_PRINT = `${INGRESS_PATH}/api/print`;
+
+// Fetch an image URL and return raw base64 (no data: prefix).
+async function fetchImageAsBase64(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`Image fetch failed (${r.status})`);
+  const blob = await r.blob();
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const s = String(reader.result || '');
+      const i = s.indexOf(',');
+      resolve(i >= 0 ? s.slice(i + 1) : s);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -82,13 +100,55 @@ function RecipeCard({ recipe, onClick }) {
 // ---------------------------------------------------------------------------
 // RecipeDetail — full-screen overlay
 // ---------------------------------------------------------------------------
-function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete }) {
+function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, onToast }) {
   if (!recipe) return null;
 
   const imgUrl = recipeImageUrl(recipe.picture_filename);
   const hasOpened = recipe.ingredients?.some(
     (i) => i.status === 'yellow',
   );
+
+  const [printing, setPrinting] = useState(false);
+  const handlePrint = useCallback(async () => {
+    if (printing) return;
+    setPrinting(true);
+    try {
+      let image_b64 = null;
+      if (imgUrl) {
+        try {
+          image_b64 = await fetchImageAsBase64(imgUrl);
+        } catch (e) {
+          // Non-fatal: print without the hero image.
+          // eslint-disable-next-line no-console
+          console.warn('Could not fetch recipe image:', e);
+        }
+      }
+      const ingredients = (recipe.ingredients || []).map((ing) => ({
+        product_name: ing.product_name,
+        amount_needed: ing.amount_needed,
+        unit_abbrev: ing.unit_abbrev,
+        parent_name: ing.parent_name,
+        note: ing.note,
+      }));
+      const payload = {
+        recipe: {
+          name: recipe.name,
+          servings: recipe.servings,
+          source_url: recipe.source_url,
+          ingredients,
+          instructions: recipe.instructions || [],
+        },
+        image_b64,
+      };
+      await axios.post(`${API_PRINT}/print/recipe`, payload);
+      onToast?.('Tulostettu', 'success');
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err?.message || 'tuntematon virhe';
+      onToast?.(`Tulostus epäonnistui: ${msg}`, 'error');
+    } finally {
+      setPrinting(false);
+    }
+  }, [recipe, imgUrl, printing, onToast]);
 
   return (
     <div
@@ -197,6 +257,13 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete }
             className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-brand-cobalt hover:bg-brand-cobalt-400 active:bg-brand-cobalt-600 transition-colors"
           >
             Lisää ostoslistalle
+          </button>
+          <button
+            onClick={handlePrint}
+            disabled={printing}
+            className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-gray-700 hover:bg-gray-600 active:bg-gray-800 disabled:opacity-50 disabled:hover:bg-gray-700 transition-colors"
+          >
+            {printing ? '🖨 Tulostetaan…' : '🖨 Tulosta kuittipaperille'}
           </button>
           <button
             onClick={onDelete}
@@ -735,6 +802,7 @@ export default function App() {
           onAddToShoppingList={handleAddToShoppingList}
           onCook={handleCookClick}
           onDelete={handleDeleteClick}
+          onToast={addToast}
         />
       )}
 

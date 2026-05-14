@@ -1,3 +1,7 @@
+## 2.1.0
+- Add **🖨 Tulosta kuittipaperille** button in the recipe-detail overlay. POSTs the recipe (title, servings, ingredients, instructions, hero image as base64) to the new HA-print add-on for printing on an IP-connected 80mm thermal receipt printer (Xprinter XP-80T compatible). Image is rendered with Floyd-Steinberg dithering at 384px wide.
+- Add `/api/print/` nginx proxy with auto-discovery of the HA-print add-on. Optional `print_url` config override.
+
 ## 2.0.1
 - Add **"What's new"** popup — when you open Recipe after an update, a dismissable modal shows the changelog entries for every version released since your last visit. Markers persist per-browser via `localStorage` (`recipes_whatsnew_lastSeen`); first visit silently marks the current version as seen so users don't get a wall of historical changelog on first install
 

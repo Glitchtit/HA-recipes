@@ -98,6 +98,44 @@ _detect_scraper() {
     echo "${_url}"
 }
 
+_detect_print() {
+    local _url=""
+    if [ -n "${REPO_PREFIX}" ] && [ "${REPO_PREFIX}" != "${MY_HOSTNAME_NORM}" ]; then
+        for _c in "${REPO_PREFIX}-ha-print" "${REPO_PREFIX}_ha_print"; do
+            if curl -sf --max-time 3 "http://${_c}:8100/api/health" >/dev/null 2>&1; then
+                _url="http://${_c}:8100"
+                break
+            fi
+        done
+    fi
+    if [ -z "${_url}" ] && [ -n "${SUPERVISOR_TOKEN}" ]; then
+        local _slug=""
+        _slug=$(curl -sf --max-time 5 \
+            -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+            http://supervisor/addons \
+            | jq -r '[.data.addons[]? | select(.slug | test("ha.print"; "i"))][0].slug // empty') || true
+        if [ -z "${_slug}" ]; then
+            _slug=$(curl -sf --max-time 5 \
+                -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+                http://supervisor/addons \
+                | jq -r '[.data.addons[]? | select(.name | test("ha.print|^print$"; "i"))][0].slug // empty') || true
+        fi
+        if [ -n "${_slug}" ]; then
+            local _ip=""
+            _ip=$(curl -sf --max-time 5 \
+                -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+                "http://supervisor/addons/${_slug}/info" \
+                | jq -r '.data.ip_address // empty') || true
+            if [ -n "${_ip}" ]; then
+                _url="http://${_ip}:8100"
+            elif curl -sf --max-time 3 "http://${_slug}:8100/api/health" >/dev/null 2>&1; then
+                _url="http://${_slug}:8100"
+            fi
+        fi
+    fi
+    echo "${_url}"
+}
+
 _STORAGE_FALLBACK="http://localhost:8099"
 _SCRAPER_PLACEHOLDER="http://127.0.0.1:1"
 STORAGE_AUTODETECT=0
@@ -137,20 +175,41 @@ fi
 [ -z "${SCRAPER_URL}" ] && SCRAPER_URL="${_SCRAPER_PLACEHOLDER}"
 export SCRAPER_URL
 
+_PRINT_PLACEHOLDER="http://127.0.0.1:1"
+PRINT_AUTODETECT=0
+PRINT_URL=""
+
+if bashio::config.has_value 'print_url'; then
+    PRINT_URL=$(bashio::config 'print_url')
+    bashio::log.info "Print URL (from config): ${PRINT_URL}"
+else
+    PRINT_AUTODETECT=1
+    bashio::log.info "Attempting auto-detect of HA-print addon..."
+    PRINT_URL=$(_detect_print)
+    if [ -n "${PRINT_URL}" ]; then
+        bashio::log.info "Print URL (auto-detected): ${PRINT_URL}"
+    else
+        bashio::log.info "HA-print addon not found -- will retry in background every 30 s."
+    fi
+fi
+[ -z "${PRINT_URL}" ] && PRINT_URL="${_PRINT_PLACEHOLDER}"
+export PRINT_URL
+
 bashio::log.info "Storage URL: ${STORAGE_URL}"
 bashio::log.info "Generating nginx configuration..."
-envsubst '${STORAGE_URL} ${SCRAPER_URL} ${NGINX_LOG_ROUTINE}' \
+envsubst '${STORAGE_URL} ${SCRAPER_URL} ${PRINT_URL} ${NGINX_LOG_ROUTINE}' \
   < /etc/nginx/nginx.conf.template \
   > /etc/nginx/nginx.conf
 
 # Background health monitor: runs forever when any service is in auto-detect mode.
 # - Not found: keep probing.
 # - Found but unreachable: re-detect; reload nginx only if URL changed or reverted.
-if [ "${STORAGE_AUTODETECT}" = "1" ] || [ "${SCRAPER_AUTODETECT}" = "1" ]; then
+if [ "${STORAGE_AUTODETECT}" = "1" ] || [ "${SCRAPER_AUTODETECT}" = "1" ] || [ "${PRINT_AUTODETECT}" = "1" ]; then
     bashio::log.info "Starting background service health monitor (every 30 s)..."
     (
         _cur_storage="${STORAGE_URL}"
         _cur_scraper="${SCRAPER_URL}"
+        _cur_print="${PRINT_URL}"
         while sleep 30; do
             _changed=0
 
@@ -194,13 +253,34 @@ if [ "${STORAGE_AUTODETECT}" = "1" ] || [ "${SCRAPER_AUTODETECT}" = "1" ]; then
                 fi
             fi
 
+            if [ "${PRINT_AUTODETECT}" = "1" ]; then
+                if [ "${_cur_print}" = "${_PRINT_PLACEHOLDER}" ]; then
+                    _new=$(_detect_print)
+                    if [ -n "${_new}" ]; then
+                        bashio::log.info "HA-print found at ${_new} -- updating config."
+                        _cur_print="${_new}"; _changed=1
+                    fi
+                elif ! curl -sf --max-time 3 "${_cur_print}/api/health" >/dev/null 2>&1; then
+                    bashio::log.warning "HA-print at ${_cur_print} unreachable -- re-detecting..."
+                    _new=$(_detect_print)
+                    if [ -n "${_new}" ] && [ "${_new}" != "${_cur_print}" ]; then
+                        bashio::log.info "HA-print re-detected at ${_new}."
+                        _cur_print="${_new}"; _changed=1
+                    elif [ -z "${_new}" ]; then
+                        bashio::log.warning "HA-print not found -- reverting to placeholder."
+                        _cur_print="${_PRINT_PLACEHOLDER}"; _changed=1
+                    fi
+                fi
+            fi
+
             if [ "${_changed}" = "1" ]; then
                 STORAGE_URL="${_cur_storage}"
                 SCRAPER_URL="${_cur_scraper}"
-                envsubst '${STORAGE_URL} ${SCRAPER_URL} ${NGINX_LOG_ROUTINE}' \
+                PRINT_URL="${_cur_print}"
+                envsubst '${STORAGE_URL} ${SCRAPER_URL} ${PRINT_URL} ${NGINX_LOG_ROUTINE}' \
                   < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
                 nginx -s reload
-                bashio::log.info "nginx reloaded (storage: ${_cur_storage}, scraper: ${_cur_scraper})."
+                bashio::log.info "nginx reloaded (storage: ${_cur_storage}, scraper: ${_cur_scraper}, print: ${_cur_print})."
             fi
         done
     ) &

@@ -89,6 +89,22 @@ http {
             proxy_send_timeout    30s;
         }
 
+        # ── Print API proxy ───────────────────────────────────────────────
+        # Strips /api/print/ prefix and forwards to the HA-print addon's
+        # FastAPI service (port 8100). Used by the RecipeDetail 🖨 button
+        # to render and print a recipe on the configured thermal printer.
+        location ^~ /api/print/ {
+            proxy_pass         ${PRINT_URL}/api/;
+            proxy_set_header   Host              $http_host;
+            proxy_set_header   X-Real-IP         $remote_addr;
+            proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_http_version 1.1;
+            proxy_buffering    off;
+            proxy_connect_timeout 10s;
+            proxy_read_timeout    30s;
+            proxy_send_timeout    30s;
+        }
+
         # ── Static assets (long-lived cache) ──────────────────────────────
         location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
             expires    1y;
