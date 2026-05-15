@@ -1,3 +1,6 @@
+## 2.2.2
+- Variant preservation rules from 2.2.1 are now actually wired into the live recipe-scraping path. 2.2.1 updated `_translate_ingredients`, a function that the scraping pipeline does not call; the live path is `_summarize_recipe → _extract_recipe_from_summary`, and both prompts now recognise Swedish source words (syltsocker, vaniljsocker, vispgrädde, margarin, …) and emit the matching Finnish variants (hillosokeri, vaniljasokeri, vispikerma, margariini, …). Re-import affected recipes to refresh stored ingredients.
+
 ## 2.2.1
 - Recipe ingredient translator now preserves non-interchangeable sugar, fat, flour, and dairy variants (syltsocker→hillosokeri, vaniljsocker→vaniljasokeri, florsocker→tomusokeri, vispgrädde→vispikerma, etc.) instead of collapsing them onto the plain generic product. Fixes recipes like Camillas bästa rabarberpaj where three Swedish sugar variants all bound to a single Finnish "sokeri" product.
 
