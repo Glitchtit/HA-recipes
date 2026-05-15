@@ -342,3 +342,34 @@ class TestCreateChildStubsForUnmatchedSpecifics:
 
         assert created == set()
         assert posts == []
+
+    def test_climbs_when_matched_product_is_a_child(self, monkeypatch):
+        """When the matched product is itself a child (e.g. Sokeri is a child
+        of Makeutusaineet), the new variant stub should land as a sibling of
+        the matched product (under the grandparent), not as a grandchild."""
+        products = [
+            {"id": 5, "name": "Makeutusaineet", "parent_id": None, "unit_id": 4, "location_id": 1, "product_group_id": 7},
+            {"id": 10, "name": "Sokeri", "parent_id": 5, "unit_id": 4, "location_id": 1, "product_group_id": 7},
+        ]
+        posts: list[tuple[str, dict]] = []
+
+        def fake_api_post(path, data=None, **_kwargs):
+            posts.append((path, data))
+            return {"id": 200}
+
+        monkeypatch.setattr(backend, "_api_post", fake_api_post)
+
+        ingredients = [
+            {"name": "sokeri", "specific": "hillosokeri", "_product_id": 10, "_specificity": "loose"},
+        ]
+
+        created = backend._create_child_stubs_for_unmatched_specifics(ingredients, products)
+
+        assert created == {200}
+        assert len(posts) == 1
+        _path, body = posts[0]
+        # Stub created under Makeutusaineet (id=5), not under Sokeri (id=10)
+        assert body["parent_id"] == 5
+        assert body["name"] == "hillosokeri"
+        assert ingredients[0]["_product_id"] == 200
+        assert ingredients[0]["_specificity"] == "strict"

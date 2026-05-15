@@ -2392,12 +2392,19 @@ def _handle_scrape(url: str) -> dict:
 
     # 5b. Create child stubs for ingredients that matched a parent loosely
     # but carry a non-null specific variant (e.g. specific="hillosokeri" under
-    # parent "sokeri"). Without this pass the variant is silently dropped.
+    # parent "sokeri"). Pass the merged active+group-master universe — the
+    # matcher will have bound to either pool, and inactive Group-master stubs
+    # from earlier scrapes are NOT in `products` (which is active-only).
+    known_products = list({
+        p["id"]: p
+        for p in (products + (group_master_products or []))
+    }.values())
     child_stub_ids = _create_child_stubs_for_unmatched_specifics(
-        recipe_data.get("ingredients", []), products,
+        recipe_data.get("ingredients", []), known_products,
     )
     if child_stub_ids:
         products = _get_all_products()
+        group_master_id, group_master_products = _get_group_master_products()
 
     # 6. Create stub parent products (group masters) for any still-unmatched ingredients
     stub_product_ids: set[int] = set(child_stub_ids)

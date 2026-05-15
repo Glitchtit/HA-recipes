@@ -1,3 +1,6 @@
+## 2.2.6
+- Child-stub creation now sees inactive Group-master products. Previous releases passed only `_get_all_products()` (active-only) to the variant-stub function, but the matcher binds via `group_master_products` which also includes inactive auto-stubs from earlier scrapes. Result: every `specific` candidate was silently skipped with "matched product not in products list". The orchestrator now merges both pools by id before calling `_create_child_stubs_for_unmatched_specifics`, and refreshes both after creation.
+
 ## 2.2.5
 - Child-stub creation now climbs to the grandparent when the matched product is itself a child product (e.g. `Sokeri` under `Makeutusaineet`), so the new variant stub (e.g. `Hillosokeri`) lands as a sibling rather than being silently rejected. Also adds `DIAG/childstub` logging at every decision point so the function's behaviour is observable in the supervisor log when iterating on variant handling.
 
