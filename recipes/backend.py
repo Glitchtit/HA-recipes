@@ -1783,27 +1783,72 @@ def _create_child_stubs_for_unmatched_specifics(
 
     created: set[int] = set()
 
+    log.info(
+        "DIAG/childstub entry: %d ingredients, %d products in catalog",
+        len(ingredients), len(products),
+    )
+
     for ing in ingredients:
+        ing_name = ing.get("name")
+        specific = ing.get("specific")
         if ing.get("_specificity") != "loose":
+            log.info(
+                "DIAG/childstub skip '%s' (specific=%r): _specificity=%r != loose",
+                ing_name, specific, ing.get("_specificity"),
+            )
             continue
         parent_id_raw = ing.get("_product_id")
         if parent_id_raw is None:
+            log.info("DIAG/childstub skip '%s' (specific=%r): _product_id is None", ing_name, specific)
             continue
-        specific = ing.get("specific")
         if not specific:
+            # Generic ingredient — nothing to elevate. Quietly skip without logging.
             continue
 
         parent_id = int(parent_id_raw)
         parent = by_id.get(parent_id)
-        if not parent or parent.get("parent_id") is not None:
+        if not parent:
+            log.info(
+                "DIAG/childstub skip '%s' (specific=%r): matched product id=%d not in products list",
+                ing_name, specific, parent_id,
+            )
             continue
+
+        # If the matched product is itself a child (e.g., Sokeri is a child of
+        # Makeutusaineet), climb to its parent so the new stub lands as a
+        # sibling of the matched product rather than a grandchild.
+        if parent.get("parent_id") is not None:
+            grand_id = int(parent["parent_id"])
+            grandparent = by_id.get(grand_id)
+            if grandparent:
+                log.info(
+                    "DIAG/childstub '%s' (specific=%r): matched product '%s' (id=%d) is a child of '%s' (id=%d) — climbing to grandparent",
+                    ing_name, specific, parent["name"], parent_id, grandparent["name"], grand_id,
+                )
+                parent_id = grand_id
+                parent = grandparent
+            else:
+                log.info(
+                    "DIAG/childstub skip '%s' (specific=%r): matched product is a child but grandparent id=%d not in products list",
+                    ing_name, specific, grand_id,
+                )
+                continue
 
         spec_key = specific.lower().strip()
         existing_child = children_by_parent.get(parent_id, {}).get(spec_key)
         if existing_child:
+            log.info(
+                "DIAG/childstub '%s' (specific=%r): reusing existing child '%s' (id=%d) under parent '%s' (id=%d)",
+                ing_name, specific, existing_child["name"], existing_child["id"], parent["name"], parent_id,
+            )
             ing["_product_id"] = int(existing_child["id"])
             ing["_specificity"] = "strict"
             continue
+
+        log.info(
+            "DIAG/childstub '%s' (specific=%r): creating child stub under parent '%s' (id=%d)",
+            ing_name, specific, parent["name"], parent_id,
+        )
 
         stub_body: dict = {
             "name": specific,

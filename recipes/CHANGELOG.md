@@ -1,3 +1,6 @@
+## 2.2.5
+- Child-stub creation now climbs to the grandparent when the matched product is itself a child product (e.g. `Sokeri` under `Makeutusaineet`), so the new variant stub (e.g. `Hillosokeri`) lands as a sibling rather than being silently rejected. Also adds `DIAG/childstub` logging at every decision point so the function's behaviour is observable in the supervisor log when iterating on variant handling.
+
 ## 2.2.4
 - Diagnostic logging only. Adds `log.info("DIAG/summarize ...")` and `log.info("DIAG/extract ...")` around the AI scraping pipeline so we can see exactly what `_summarize_recipe` emits to disk and what `_extract_recipe_from_summary` produces (per-ingredient `name`, `specific`, `note`). Will be removed in 2.2.5 once the variant-preservation pipeline is confirmed working end-to-end.
 
