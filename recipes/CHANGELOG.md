@@ -1,3 +1,7 @@
+## 2.2.7
+- Strip leading numbering ("1. ", "2) ", "3- ") from instruction strings after extraction. The summarize prompt asks Gemini to number steps so it preserves order, but the extract step carried those prefixes into the instructions array and the frontend's `<ol>` rendered them doubled ("1. 1. Sätt ugnen...").
+- Remove the DIAG/summarize, DIAG/extract, and DIAG/childstub log scaffolding from 2.2.4/2.2.5 now that the variant pipeline is confirmed working end-to-end on the rabarberpaj recipe.
+
 ## 2.2.6
 - Child-stub creation now sees inactive Group-master products. Previous releases passed only `_get_all_products()` (active-only) to the variant-stub function, but the matcher binds via `group_master_products` which also includes inactive auto-stubs from earlier scrapes. Result: every `specific` candidate was silently skipped with "matched product not in products list". The orchestrator now merges both pools by id before calling `_create_child_stubs_for_unmatched_specifics`, and refreshes both after creation.
 

@@ -343,6 +343,23 @@ class TestCreateChildStubsForUnmatchedSpecifics:
         assert created == set()
         assert posts == []
 
+    def test_strip_instruction_numbering(self):
+        raw = [
+            "1. Sätt ugnen på 175 grader.",
+            "2. Skölj rabarbern.",
+            "3) Häll blandningen i pajform.",
+            "Servera med vaniljglass.",  # no prefix — pass through
+            "1.5 dl vatten i botten.",   # decimal — must NOT be stripped
+        ]
+        out = backend._strip_instruction_numbering(raw)
+        assert out == [
+            "Sätt ugnen på 175 grader.",
+            "Skölj rabarbern.",
+            "Häll blandningen i pajform.",
+            "Servera med vaniljglass.",
+            "1.5 dl vatten i botten.",
+        ]
+
     def test_climbs_when_matched_product_is_a_child(self, monkeypatch):
         """When the matched product is itself a child (e.g. Sokeri is a child
         of Makeutusaineet), the new variant stub should land as a sibling of
