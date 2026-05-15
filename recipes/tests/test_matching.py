@@ -148,3 +148,42 @@ class TestAiMatchIngredientsSpecificity:
         # Children "Parmesan" and "Gouda" must be present in the prompt's product list
         assert "Parmesan" in captured["prompt"]
         assert "Gouda" in captured["prompt"]
+
+
+class TestTranslatePromptVariantRules:
+    """Prompt-content regression guard for the rabarberpaj bug.
+
+    The translation prompt must teach the AI to preserve non-interchangeable
+    sugar/fat/flour/dairy variants instead of collapsing them onto plain
+    generics. We assert on the prompt text (captured from the mocked
+    _call_ai_json) rather than the model's output, so the test is
+    deterministic and fails loudly if a future edit drops the variant rules.
+    """
+
+    def test_translate_prompt_includes_variant_reasoning_rules(self, monkeypatch):
+        captured = {}
+
+        def fake_call(prompt):
+            captured["prompt"] = prompt
+            return []
+
+        monkeypatch.setattr(backend, "_call_ai_json", fake_call)
+
+        backend._translate_ingredients(["1 dl syltsocker"])
+
+        prompt = captured["prompt"]
+        # Reasoning principle present in some form
+        assert "swap" in prompt.lower() or "interchangeable" in prompt.lower(), (
+            "Prompt must teach the swap-test reasoning principle"
+        )
+        # Sugar variant exemplars
+        assert "syltsocker" in prompt and "hillosokeri" in prompt
+        assert "vaniljsocker" in prompt and "vaniljasokeri" in prompt
+        assert "tomusokeri" in prompt  # powdered
+        assert "fariinisokeri" in prompt  # brown
+        # Fat variants
+        assert "margariini" in prompt
+        # Flour variants (rye was already there; check a newly added one)
+        assert "mantelijauho" in prompt or "speltijauho" in prompt
+        # Dairy
+        assert "vispikerma" in prompt
