@@ -216,3 +216,129 @@ class TestExtractPromptVariantRules:
         # Swedish source words the AI sees from _summarize_recipe must be enumerated
         assert "syltsocker" in prompt, "extract prompt must name 'syltsocker' as the Swedish source word"
         assert "vaniljsocker" in prompt, "extract prompt must name 'vaniljsocker' as the Swedish source word"
+
+
+class TestCreateChildStubsForUnmatchedSpecifics:
+    """Auto-create child products for ingredients that matched a parent
+    loosely but named a non-interchangeable specific variant.
+
+    Closes the architectural gap behind the rabarberpaj bug: even with the
+    extract prompt emitting specific="hillosokeri", the matcher falls back
+    to the parent Sokeri loosely and no child product is ever created.
+    This pass creates the child and re-binds the ingredient as strict.
+    """
+
+    @pytest.fixture
+    def products_with_sokeri_parent(self):
+        return [
+            {"id": 10, "name": "Sokeri", "parent_id": None, "unit_id": 4, "location_id": 1, "product_group_id": 7},
+            {"id": 99, "name": "Voi", "parent_id": None, "unit_id": 1, "location_id": 1},
+        ]
+
+    def test_creates_child_for_unmatched_specific(self, products_with_sokeri_parent, monkeypatch):
+        posts: list[tuple[str, dict]] = []
+
+        def fake_api_post(path, data=None, **_kwargs):
+            posts.append((path, data))
+            return {"id": 200}
+
+        monkeypatch.setattr(backend, "_api_post", fake_api_post)
+
+        ingredients = [
+            {"name": "sokeri", "specific": "hillosokeri", "_product_id": 10, "_specificity": "loose"},
+        ]
+
+        created = backend._create_child_stubs_for_unmatched_specifics(
+            ingredients, products_with_sokeri_parent,
+        )
+
+        assert created == {200}
+        assert len(posts) == 1
+        path, body = posts[0]
+        assert path == "products"
+        assert body["name"] == "hillosokeri"
+        assert body["parent_id"] == 10
+        assert body["active"] is False
+        # Parent's product_group_id propagates so the child lands under the same group
+        assert body.get("product_group_id") == 7
+        # Ingredient re-bound to the new child as strict
+        assert ingredients[0]["_product_id"] == 200
+        assert ingredients[0]["_specificity"] == "strict"
+
+    def test_reuses_existing_child(self, products_with_sokeri_parent, monkeypatch):
+        products = products_with_sokeri_parent + [
+            {"id": 201, "name": "Hillosokeri", "parent_id": 10},
+        ]
+        posts: list = []
+        monkeypatch.setattr(backend, "_api_post",
+                            lambda *a, **kw: posts.append((a, kw)) or {"id": -1})
+
+        ingredients = [
+            {"name": "sokeri", "specific": "hillosokeri", "_product_id": 10, "_specificity": "loose"},
+        ]
+
+        created = backend._create_child_stubs_for_unmatched_specifics(ingredients, products)
+
+        assert created == set()
+        assert posts == []
+        # Re-bound to the existing child as strict
+        assert ingredients[0]["_product_id"] == 201
+        assert ingredients[0]["_specificity"] == "strict"
+
+    def test_dedup_within_same_recipe(self, products_with_sokeri_parent, monkeypatch):
+        next_id = [200]
+        posts: list = []
+
+        def fake_api_post(path, data=None, **_kwargs):
+            posts.append((path, data))
+            cur = next_id[0]
+            next_id[0] += 1
+            return {"id": cur}
+
+        monkeypatch.setattr(backend, "_api_post", fake_api_post)
+
+        ingredients = [
+            {"name": "sokeri", "specific": "hillosokeri", "_product_id": 10, "_specificity": "loose"},
+            {"name": "sokeri", "specific": "hillosokeri", "_product_id": 10, "_specificity": "loose"},
+        ]
+
+        created = backend._create_child_stubs_for_unmatched_specifics(
+            ingredients, products_with_sokeri_parent,
+        )
+
+        assert len(posts) == 1
+        assert created == {200}
+        assert ingredients[0]["_product_id"] == 200
+        assert ingredients[1]["_product_id"] == 200
+
+    def test_skips_strict_match(self, products_with_sokeri_parent, monkeypatch):
+        posts: list = []
+        monkeypatch.setattr(backend, "_api_post",
+                            lambda *a, **kw: posts.append((a, kw)) or {"id": -1})
+
+        ingredients = [
+            {"name": "sokeri", "specific": "hillosokeri", "_product_id": 42, "_specificity": "strict"},
+        ]
+
+        created = backend._create_child_stubs_for_unmatched_specifics(
+            ingredients, products_with_sokeri_parent,
+        )
+
+        assert created == set()
+        assert posts == []
+
+    def test_skips_when_specific_is_null(self, products_with_sokeri_parent, monkeypatch):
+        posts: list = []
+        monkeypatch.setattr(backend, "_api_post",
+                            lambda *a, **kw: posts.append((a, kw)) or {"id": -1})
+
+        ingredients = [
+            {"name": "sokeri", "specific": None, "_product_id": 10, "_specificity": "loose"},
+        ]
+
+        created = backend._create_child_stubs_for_unmatched_specifics(
+            ingredients, products_with_sokeri_parent,
+        )
+
+        assert created == set()
+        assert posts == []
