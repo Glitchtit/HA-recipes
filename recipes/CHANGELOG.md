@@ -1,3 +1,6 @@
+## 2.2.9
+- Diagnostic logging only. Adds `log.info("DIAG/recipestatus ...")` in `_get_recipe_detail` that dumps the matched product (id, name, parent, active), the recipe's needed amount/unit, the resolved stock (amount, unit, amount_opened), the child-stock-converted total, and the final status for every ingredient on each recipe view. Used to diagnose mis-bound stock-state cases (e.g. Punasipuli marked red despite being in stock). Will be removed in 2.2.10.
+
 ## 2.2.8
 - Recipe instructions are now always extracted in English regardless of the source language. Ingredient names stay in Finnish (no change) and the recipe title stays in the source language (no change). The "OHJEET" section header is a frontend label and is unaffected. Re-import a recipe to refresh its instructions to English.
 

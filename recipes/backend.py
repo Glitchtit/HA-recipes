@@ -2125,6 +2125,15 @@ def _get_recipe_detail(recipe_id: int) -> dict:
             if parent:
                 parent_name = parent.get("name")
 
+        log.info(
+            "DIAG/recipestatus recipe=%s pid=%d name=%r parent=%s active=%s | needed=%s unit=%s(%s) | stock=%s unit=%s opened=%s | child_conv=%s | spec=%s → %s",
+            recipe_id, pid, product_name, parent_name, product.get("active"),
+            needed, unit_abbrev, recipe_unit_id,
+            in_stock_pieces, stock_unit_id, amount_opened,
+            child_stock_converted,
+            specificity, status,
+        )
+
         ingredients.append({
             "id": pos.get("id"),
             "product_id": pid,
