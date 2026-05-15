@@ -1739,6 +1739,99 @@ RULES:
     return unmatched
 
 
+def _create_child_stubs_for_unmatched_specifics(
+    ingredients: list[dict],
+    products: list[dict],
+) -> set[int]:
+    """Create stub child products for ingredients that matched a parent loosely
+    but named a non-interchangeable specific variant.
+
+    Closes the gap between the strict/loose matcher and the auto-stub pipeline:
+    an ingredient whose `specific` does not resolve to a child product falls
+    back to the parent with `_specificity="loose"`. The fully-unmatched stub
+    pass at the bottom of `scrape_recipe` does not see it (it has a parent
+    binding), so the variant is silently dropped. This function fills that gap.
+
+    Mutates each affected ingredient: `_product_id` becomes the new (or existing)
+    child id and `_specificity` is promoted to "strict". Returns the set of
+    newly created product IDs.
+    """
+    if not ingredients:
+        return set()
+
+    by_id: dict[int, dict] = {p["id"]: p for p in products}
+    children_by_parent: dict[int, dict[str, dict]] = {}
+    for p in products:
+        pid = p.get("parent_id")
+        if pid is not None:
+            children_by_parent.setdefault(int(pid), {})[p["name"].lower().strip()] = p
+
+    created: set[int] = set()
+
+    for ing in ingredients:
+        if ing.get("_specificity") != "loose":
+            continue
+        parent_id_raw = ing.get("_product_id")
+        if parent_id_raw is None:
+            continue
+        specific = ing.get("specific")
+        if not specific:
+            continue
+
+        parent_id = int(parent_id_raw)
+        parent = by_id.get(parent_id)
+        if not parent or parent.get("parent_id") is not None:
+            continue
+
+        spec_key = specific.lower().strip()
+        existing_child = children_by_parent.get(parent_id, {}).get(spec_key)
+        if existing_child:
+            ing["_product_id"] = int(existing_child["id"])
+            ing["_specificity"] = "strict"
+            continue
+
+        stub_body: dict = {
+            "name": specific,
+            "parent_id": parent_id,
+            "description": f"Auto-created child of {parent['name']} for recipe variant",
+            "unit_id": parent.get("unit_id"),
+            "location_id": parent.get("location_id"),
+            "default_best_before_days": 0,
+            "active": False,
+            "min_stock_amount": 0,
+        }
+        if parent.get("product_group_id") is not None:
+            stub_body["product_group_id"] = parent["product_group_id"]
+        try:
+            resp = _api_post("products", stub_body)
+        except Exception as exc:
+            log.warning(
+                "Failed to create child stub '%s' under '%s': %s",
+                specific, parent["name"], exc,
+            )
+            continue
+
+        new_id = resp.get("id") if isinstance(resp, dict) else None
+        if not new_id:
+            continue
+
+        new_id = int(new_id)
+        ing["_product_id"] = new_id
+        ing["_specificity"] = "strict"
+        created.add(new_id)
+        children_by_parent.setdefault(parent_id, {})[spec_key] = {
+            "id": new_id,
+            "name": specific,
+            "parent_id": parent_id,
+        }
+        log.info(
+            "Created child stub '%s' (id=%s) under parent '%s' for recipe variant",
+            specific, new_id, parent["name"],
+        )
+
+    return created
+
+
 # ---------------------------------------------------------------------------
 # Recipe CRUD
 # ---------------------------------------------------------------------------
@@ -2237,8 +2330,17 @@ def _handle_scrape(url: str) -> dict:
                     recipe_data.get("ingredients", []), products, group_masters=group_master_products
                 )
 
+    # 5b. Create child stubs for ingredients that matched a parent loosely
+    # but carry a non-null specific variant (e.g. specific="hillosokeri" under
+    # parent "sokeri"). Without this pass the variant is silently dropped.
+    child_stub_ids = _create_child_stubs_for_unmatched_specifics(
+        recipe_data.get("ingredients", []), products,
+    )
+    if child_stub_ids:
+        products = _get_all_products()
+
     # 6. Create stub parent products (group masters) for any still-unmatched ingredients
-    stub_product_ids: set[int] = set()
+    stub_product_ids: set[int] = set(child_stub_ids)
     still_unmatched = [
         i for i in recipe_data.get("ingredients", [])
         if i.get("_product_id") is None
