@@ -1,3 +1,6 @@
+## 2.2.3
+- Auto-create child product stubs for recipe ingredients that match a parent loosely but name a non-interchangeable specific variant. 2.2.1 + 2.2.2 fixed the AI prompts so the extract step emits `specific="hillosokeri"` / `specific="vaniljasokeri"`, but the matcher's fall-back-to-parent path silently dropped the variant — no child product was ever created. Now `_create_child_stubs_for_unmatched_specifics` runs after AI matching and scraper discovery, creating an inactive child under the matched parent (e.g. `Hillosokeri` under `Sokeri`) and re-binding the ingredient as strict. Re-import affected recipes to see the new bindings.
+
 ## 2.2.2
 - Variant preservation rules from 2.2.1 are now actually wired into the live recipe-scraping path. 2.2.1 updated `_translate_ingredients`, a function that the scraping pipeline does not call; the live path is `_summarize_recipe → _extract_recipe_from_summary`, and both prompts now recognise Swedish source words (syltsocker, vaniljsocker, vispgrädde, margarin, …) and emit the matching Finnish variants (hillosokeri, vaniljasokeri, vispikerma, margariini, …). Re-import affected recipes to refresh stored ingredients.
 
