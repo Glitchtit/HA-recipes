@@ -1,3 +1,6 @@
+## 2.2.1
+- Recipe ingredient translator now preserves non-interchangeable sugar, fat, flour, and dairy variants (syltsocker→hillosokeri, vaniljsocker→vaniljasokeri, florsocker→tomusokeri, vispgrädde→vispikerma, etc.) instead of collapsing them onto the plain generic product. Fixes recipes like Camillas bästa rabarberpaj where three Swedish sugar variants all bound to a single Finnish "sokeri" product.
+
 ## 2.2.0
 - Ingredient matching now distinguishes **strict** ("recipe asked for parmesan, only parmesan counts") from **loose** ("any cheese is fine"). The summary/extract step preserves specific Finnish variant names (parmesan, gouda, juustoraaste, oliiviöljy, ruisjauho, spaghetti, basmati, …) in a new `specific` field, and the matcher prefers a same-named child product (returning `strict`) before falling back to the generic parent (returning `loose`). The AI matcher's candidate pool now includes children of group masters, not only the parents themselves, and emits the chosen specificity directly. Requires HA-Storage ≥ 0.12.3.
 - Stock status in `_get_recipe_detail` skips child-stock aggregation for strict ingredients — a recipe asking for parmesan with only gouda on hand reports red, as expected. Shopping-list flow adds the specific child product (not the parent) for strict ingredients.
