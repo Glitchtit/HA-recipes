@@ -1,3 +1,8 @@
+## 2.2.0
+- Ingredient matching now distinguishes **strict** ("recipe asked for parmesan, only parmesan counts") from **loose** ("any cheese is fine"). The summary/extract step preserves specific Finnish variant names (parmesan, gouda, juustoraaste, oliiviöljy, ruisjauho, spaghetti, basmati, …) in a new `specific` field, and the matcher prefers a same-named child product (returning `strict`) before falling back to the generic parent (returning `loose`). The AI matcher's candidate pool now includes children of group masters, not only the parents themselves, and emits the chosen specificity directly. Requires HA-Storage ≥ 0.12.3.
+- Stock status in `_get_recipe_detail` skips child-stock aggregation for strict ingredients — a recipe asking for parmesan with only gouda on hand reports red, as expected. Shopping-list flow adds the specific child product (not the parent) for strict ingredients.
+- New `tests/test_matching.py` covering the matcher's strict/loose decision tree.
+
 ## 2.1.0
 - Add **🖨 Tulosta kuittipaperille** button in the recipe-detail overlay. POSTs the recipe (title, servings, ingredients, instructions, hero image as base64) to the new HA-print add-on for printing on an IP-connected 80mm thermal receipt printer (Xprinter XP-80T compatible). Image is rendered with Floyd-Steinberg dithering at 384px wide.
 - Add `/api/print/` nginx proxy with auto-discovery of the HA-print add-on. Optional `print_url` config override.

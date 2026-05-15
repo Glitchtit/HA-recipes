@@ -1210,11 +1210,12 @@ Ingredient strings:
 {lines}
 
 Return a JSON array, one object per ingredient:
-[{{"name": "Finnish ingredient name", "amount": <number or null>, "unit": "unit or null", "note": "prep note or null"}}]
+[{{"name": "generic Finnish ingredient name", "specific": "specific Finnish variant or null", "amount": <number or null>, "unit": "unit or null", "note": "prep note or null"}}]
 
 RULES:
 - Translate ALL ingredient names to Finnish (smör→voi, mjölk→maito, butter→voi, milk→maito, salt→suola, flour→vehnäjauho, egg→kananmuna, ägg→kananmuna, potato→peruna, lök→sipuli, vitlök→valkosipuli, etc.)
-- Name must be a simple generic product name (e.g. "kananmuna" not "3 kananmunaa")
+- "name" is the generic category (e.g. "kananmuna" not "3 kananmunaa", "juusto" not "Parmesan")
+- "specific": set to a Finnish-translated variant ONLY when the source names a non-interchangeable sub-type (parmesan, gouda, juustoraaste, mozzarella, fetajuusto, oliiviöljy, ruisjauho, spaghetti, basmati, merisuolahiutaleet, …). Plain generics ("cheese", "salt", "flour", "oil") → specific=null.
 - Amount: extract the numeric quantity (float), or null if absent
 - PARENTHETICAL ANNOTATIONS: If a string contains a weight/calorie note in parentheses like "(ca 120 g)", "(about 180g)", "(500 kcal)" → IGNORE the parenthetical. Use only the primary amount/unit before it.
   Example: "2 ägg (ca 120 g)" → amount=2, unit="kpl" NOT amount=120, unit="g"
@@ -1317,6 +1318,7 @@ Instructions:
    - Keep amounts and units EXACTLY as written in the source — do not convert, translate, or add units
    - If an ingredient has NO unit written (just a number + item name, e.g. "2 ägg", "1 citron", "3 tomater"), write it EXACTLY as-is without adding any unit. Do NOT insert g, kg, ml, dl, or any other unit.
    - Examples: "2 ägg" → "2 ägg" (NOT "2 st ägg"), "1 citron" → "1 citron" (NOT "1 g citron")
+   - PRESERVE specific variants verbatim: write "parmesan", "gouda", "juustoraaste", "fetajuusto", "mozzarella", "ruisjauho", "ekstraneitsytoliiviöljy", "merisuolahiutaleet", etc. — do NOT collapse them to a generic ("cheese", "flour", "oil", "salt"). Translation to Finnish happens in the next step; here we just want the exact variant name from the source preserved.
 4. List the cooking steps numbered 1, 2, 3...
 
 Write ONLY the clean recipe. No extra commentary, no markdown formatting."""
@@ -1341,7 +1343,7 @@ Return a JSON object with exactly these fields:
   "name": "Recipe name (in the original language of the recipe)",
   "servings": <number of servings as integer>,
   "ingredients": [
-    {{"name": "ingredient name ALWAYS IN FINNISH", "amount": <number or null>, "unit": "unit string or null", "note": "any note like 'chopped' or null"}}
+    {{"name": "generic Finnish ingredient name", "specific": "specific Finnish variant or null", "amount": <number or null>, "unit": "unit string or null", "note": "any note like 'chopped' or null"}}
   ],
   "instructions": ["Step 1 text", "Step 2 text", ...]
 }}
@@ -1351,8 +1353,28 @@ CRITICAL LANGUAGE RULES:
   Examples: "smör" → "voi", "butter" → "voi", "torskfilé" → "turskafile", "salt" → "suola",
   "milk" → "maito", "ägg" → "kananmuna", "flour" → "vehnäjauho", "potatis" → "peruna",
   "onion" → "sipuli", "garlic" → "valkosipuli", "carrot" → "porkkana"
-- Keep ingredient names as simple generic product names (e.g. "kananmuna" not "3 kananmunaa")
+- "name" is the GENERIC category in Finnish (e.g. "kananmuna" not "3 kananmunaa", "juusto" not "Parmesan-juusto")
+- "specific" is the Finnish-translated variant name when the recipe names a sub-type the household would not treat as interchangeable; otherwise null.
 - The recipe name and instructions should stay in the original language.
+
+SPECIFICITY RULES (CRITICAL — drives stock matching):
+- Set "specific" to null when the source uses a plain generic term: "cheese", "juustoa", "ost", "salt", "flour", "oil", "butter", "milk", "sokeri", "pasta", "ruisleipä".
+- Set "specific" to the Finnish variant when the source names a non-interchangeable sub-type:
+  * Cheese variants: parmesan, gouda, mozzarella, fetajuusto, juustoraaste, halloumi, cheddar, edam, brie, sinihomejuusto
+  * Salt: merisuola, merisuolahiutaleet (vs. plain suola → null)
+  * Flour: ruisjauho, kauraharitale, mantelijauho, kookosjauho (vs. plain vehnäjauho or "flour" → null)
+  * Oil: oliiviöljy, rypsiöljy, seesamiöljy, kookosöljy (vs. plain "öljy" → null)
+  * Pasta shapes: spaghetti, penne, fusilli, makaroni (vs. plain "pasta" → null)
+  * Rice: basmati, arborio, jasmiiniriisi (vs. plain "riisi" → null)
+  * Sugar: tomusokeri, fariinisokeri, ruokosokeri (vs. plain "sokeri" → null)
+  * Bread: ruisleipä, vaalealeipä (vs. plain "leipä" → null)
+- Examples:
+  "freshly grated parmesan" → {{"name": "juusto", "specific": "parmesan"}}
+  "2 dl mjölk" → {{"name": "maito", "specific": null}}
+  "1 msk olivolja" → {{"name": "öljy", "specific": "oliiviöljy"}}
+  "salt" → {{"name": "suola", "specific": null}}
+  "merisuolahiutaleet" → {{"name": "suola", "specific": "merisuolahiutaleet"}}
+  "200 g spaghetti" → {{"name": "pasta", "specific": "spaghetti"}}
 
 "TO TASTE" RULE:
 - If a line in the summary starts with "to taste" (e.g. "to taste salt", "to taste pepper")
@@ -1455,29 +1477,44 @@ def _match_ingredient(
     name: str,
     products: list[dict],
     group_masters: list[dict] | None = None,
-) -> dict | None:
-    """Find the best matching product for an ingredient name.
+    specific: str | None = None,
+) -> tuple[dict, str] | None:
+    """Find the best matching product for an ingredient.
 
-    When *group_masters* is provided (even if empty), matching is restricted
-    to that list — recipes always link to Group master category products.
-    When *group_masters* is None, falls back to exact-match over all products
-    (climbing to parent if a child is matched).
+    Returns ``(product, specificity)`` where ``specificity`` is ``"strict"``
+    when matched against a specific child product (the recipe named a
+    non-substitutable variant) and ``"loose"`` when matched against a generic
+    parent/group-master (any child of the parent is acceptable in stock).
+
+    Matching order:
+      1. If *specific* is given, exact-match against ALL active products
+         (including children, not only group masters) and return as strict.
+      2. Exact-match *name* against group masters (today's path) → loose.
+      3. Fall back to exact-match across all products with the legacy
+         climb-to-parent behavior → loose.
     """
-    name_lower = name.lower().strip()
     candidates = group_masters if group_masters is not None else products
 
+    # Stage 1: specific variant → try to find the exact child product
+    if specific:
+        spec_lower = specific.lower().strip()
+        for p in products:
+            if p["name"].lower().strip() == spec_lower:
+                return p, "strict"
+
+    # Stage 2: generic name → match against group-master/category products
+    name_lower = name.lower().strip()
     for p in candidates:
         if p["name"].lower().strip() == name_lower:
-            # Group master products have no parent_id, but keep climb logic
-            # when called without group_masters (legacy fallback path).
+            # Legacy: climb to parent when called without group_masters
             if p.get("parent_id"):
                 parent = next(
                     (pp for pp in products if pp["id"] == int(p["parent_id"])),
                     None,
                 )
                 if parent:
-                    return parent
-            return p
+                    return parent, "loose"
+            return p, "loose"
 
     return None
 
@@ -1487,27 +1524,43 @@ def _ai_match_ingredients(
     products: list[dict],
     group_masters: list[dict] | None = None,
 ) -> list[dict]:
-    """Use Gemini AI to match ingredients to Storage products when simple matching fails."""
+    """Use AI to match ingredients to Storage products when simple matching fails.
+
+    Candidate pool covers group-master parents AND their direct children, so
+    the LLM can choose a specific variant ("Parmesan") when the recipe asked
+    for one and fall back to the generic parent ("Juusto") otherwise. The
+    returned specificity is written to ``_specificity`` on the ingredient.
+    """
     unmatched = [i for i in ingredients if i.get("_product_id") is None]
     if not unmatched:
         return ingredients
 
-    # Restrict AI to Group master products when available so recipes always
-    # link to general-category products, not specific branded variants.
+    # Build matchable pool: group masters + their direct children. When called
+    # without group_masters, fall back to all parent-less products + children.
     if group_masters is not None:
-        matchable = group_masters
+        master_ids = {p["id"] for p in group_masters}
+        matchable = list(group_masters) + [
+            p for p in products if p.get("parent_id") and int(p["parent_id"]) in master_ids
+        ]
     else:
-        matchable = [p for p in products if not p.get("parent_id")]
+        parents = [p for p in products if not p.get("parent_id")]
+        matchable = parents + [p for p in products if p.get("parent_id")]
         if not matchable:
             matchable = products
 
     if not matchable:
         return ingredients
 
-    product_names = [{"id": p["id"], "name": p["name"]} for p in matchable]
+    product_names = [
+        {"id": p["id"], "name": p["name"], "parent_id": p.get("parent_id")}
+        for p in matchable
+    ]
 
     ingredient_list = json.dumps(
-        [{"index": i, "name": ing["name"]} for i, ing in enumerate(unmatched)],
+        [
+            {"index": i, "name": ing["name"], "specific": ing.get("specific")}
+            for i, ing in enumerate(unmatched)
+        ],
         ensure_ascii=False,
     )
     product_list = json.dumps(product_names[:500], ensure_ascii=False)
@@ -1520,23 +1573,24 @@ IMPORTANT CONTEXT:
 - ALL product names are in Finnish.
 - Ingredient names below have been translated to Finnish, but may still have slight variations.
 
-Ingredients to match:
+Ingredients to match (each has a generic "name" and an optional "specific" variant):
 {ingredient_list}
 
-Available products (these are general-category products, not specific brands):
+Available products. parent_id != null means it is a child variant under that parent. parent_id == null means it is a general category:
 {product_list}
 
 Return a JSON array of objects:
-[{{"index": 0, "product_id": <matched product ID or null if no match>, "confidence": "high"|"medium"|"low"}}]
+[{{"index": 0, "product_id": <matched product ID or null>, "specificity": "strict"|"loose", "confidence": "high"|"medium"|"low"}}]
 
 MATCHING RULES:
-- Match by ingredient TYPE and MEANING, not by brand name or substring.
-  Example: "suola" (salt) should match "Suola" — NOT "Lay's Chips Salted" or any chip/crisp product.
-- "voi" (butter) should match "Voi" — NOT "Voileipäkeksi" (sandwich cookie).
-- A product here represents a general category (e.g. "Maito" = any milk, "Voi" = any butter).
+- If the ingredient has a non-null "specific" field and a CHILD product semantically represents that specific variant → return that child's id with specificity="strict".
+  Example: ingredient {{"name": "juusto", "specific": "parmesan"}} + child "Parmesan" → strict match on Parmesan.
+- Otherwise, match to the GENERAL CATEGORY parent (parent_id == null) with specificity="loose".
+  Example: ingredient {{"name": "juusto", "specific": null}} → match parent "Juusto", loose.
+- If a specific variant child does NOT exist but a generic parent does → match the parent and return specificity="loose" (better a loose match than nothing; the household can still buy the right variant).
+- Match by ingredient TYPE and MEANING, not by brand name or substring. "voi" (butter) should match "Voi", NOT "Voileipäkeksi".
 - Only match with "high" or "medium" confidence — set product_id to null for poor or uncertain matches.
-- Do NOT match based on a word appearing inside a brand name or product description.
-- If the ingredient is a basic staple (suola, pippuri, sokeri, voi, maito, jauho), look for the generic product."""
+- Do NOT match based on a word appearing inside a brand name or product description."""
 
     result = _call_ai_json(prompt)
     if not result or not isinstance(result, list):
@@ -1546,10 +1600,14 @@ MATCHING RULES:
         idx = match.get("index")
         pid = match.get("product_id")
         conf = match.get("confidence", "low")
+        spec = match.get("specificity", "loose")
+        if spec not in ("strict", "loose"):
+            spec = "loose"
         if idx is not None and pid is not None and conf in ("high", "medium"):
             if 0 <= idx < len(unmatched):
                 unmatched[idx]["_product_id"] = pid
                 unmatched[idx]["_match_confidence"] = conf
+                unmatched[idx]["_specificity"] = spec
 
     return ingredients
 
@@ -1737,12 +1795,17 @@ def _create_recipe(recipe_data: dict, matched_ingredients: list[dict]) -> dict:
         if ing.get("name"):
             note_parts.append(ing["name"])
 
+        specificity = ing.get("_specificity")
+        if specificity not in ("strict", "loose"):
+            specificity = "loose"
+
         ingredients.append({
             "product_id": pid,
             "amount": float(ing.get("amount") or 0),
             "unit_id": recipe_unit_id,
             "note": " — ".join(note_parts) if note_parts else "",
             "sort_order": idx,
+            "specificity": specificity,
         })
 
     # Build description with source URL
@@ -1826,6 +1889,8 @@ def _get_recipe_detail(recipe_id: int) -> dict:
         product_name = pos.get("product_name") or product.get("name", f"Product #{pid}")
         needed = pos.get("amount") or 0
         recipe_unit_id = pos.get("unit_id")
+        specificity = pos.get("specificity", "loose")
+        aggregate_children = specificity != "strict"
 
         stock_entry = stock_by_product.get(pid)
         in_stock_pieces = 0
@@ -1836,10 +1901,11 @@ def _get_recipe_detail(recipe_id: int) -> dict:
 
         # "To taste" ingredients: green if any in stock, yellow if none
         if needed == 0:
-            if in_stock_pieces > 0 or any(
+            any_child_in_stock = aggregate_children and any(
                 stock_by_product.get(cid, {}).get("amount", 0) > 0
                 for cid in children_of.get(pid, [])
-            ):
+            )
+            if in_stock_pieces > 0 or any_child_in_stock:
                 status = "green"
             else:
                 status = "yellow"
@@ -1852,13 +1918,15 @@ def _get_recipe_detail(recipe_id: int) -> dict:
                 "amount_needed": 0,
                 "unit_abbrev": "",
                 "note": pos.get("note", ""),
+                "specificity": specificity,
                 "status": status,
             })
             continue
 
-        # Aggregate child stock for parent products
+        # Aggregate child stock only for loose ingredients (strict matches must
+        # consume exactly the linked product, not a sibling under the same parent).
         child_stock_converted = None
-        if in_stock_pieces == 0 and pid in children_of:
+        if aggregate_children and in_stock_pieces == 0 and pid in children_of:
             for cid in children_of[pid]:
                 cstock = stock_by_product.get(cid)
                 if not cstock or cstock.get("amount", 0) == 0:
@@ -1924,6 +1992,7 @@ def _get_recipe_detail(recipe_id: int) -> dict:
             "amount_needed": needed,
             "unit_abbrev": unit_abbrev,
             "note": pos.get("note", ""),
+            "specificity": specificity,
             "status": status,
         })
 
@@ -1982,8 +2051,13 @@ def _add_to_shopping_list(recipe_id: int, mode: str) -> dict:
         if not should_add:
             continue
 
-        # Prefer parent product for shopping list
-        pid = ing.get("parent_id") or ing.get("product_id")
+        # Strict ingredients: buy the exact linked product (parmesan when the
+        # recipe says parmesan). Loose ingredients: prefer the parent so the
+        # shopper picks whichever sub-variant is on sale.
+        if ing.get("specificity") == "strict":
+            pid = ing.get("product_id")
+        else:
+            pid = ing.get("parent_id") or ing.get("product_id")
         if not pid:
             continue
         pid = int(pid)
@@ -2068,10 +2142,20 @@ def _handle_scrape(url: str) -> dict:
 
     # 3. Match ingredients to products
     for ing in recipe_data.get("ingredients", []):
-        match = _match_ingredient(ing["name"], products, group_masters=group_master_products)
+        match = _match_ingredient(
+            ing["name"], products,
+            group_masters=group_master_products,
+            specific=ing.get("specific"),
+        )
         if match:
-            ing["_product_id"] = match["id"]
-            log.debug("Matched '%s' → '%s' (ID %d)", ing["name"], match["name"], match["id"])
+            prod, spec = match
+            ing["_product_id"] = prod["id"]
+            ing["_specificity"] = spec
+            log.debug(
+                "Matched '%s'%s → '%s' (ID %d, %s)",
+                ing["name"], f" (specific={ing['specific']})" if ing.get("specific") else "",
+                prod["name"], prod["id"], spec,
+            )
         else:
             ing["_product_id"] = None
 
@@ -2114,12 +2198,18 @@ def _handle_scrape(url: str) -> dict:
             for ing in unmatched:
                 if ing.get("_product_id") is not None:
                     continue
-                match = _match_ingredient(ing["name"], products, group_masters=group_master_products)
+                match = _match_ingredient(
+                    ing["name"], products,
+                    group_masters=group_master_products,
+                    specific=ing.get("specific"),
+                )
                 if match:
-                    ing["_product_id"] = match["id"]
+                    prod, spec = match
+                    ing["_product_id"] = prod["id"]
+                    ing["_specificity"] = spec
                     log.debug(
-                        "Discovered and matched '%s' → '%s' (ID %d)",
-                        ing["name"], match["name"], match["id"],
+                        "Discovered and matched '%s' → '%s' (ID %d, %s)",
+                        ing["name"], prod["name"], prod["id"], spec,
                     )
 
             # Re-run AI matching only if discovers succeeded
