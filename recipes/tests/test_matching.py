@@ -187,3 +187,32 @@ class TestTranslatePromptVariantRules:
         assert "mantelijauho" in prompt or "speltijauho" in prompt
         # Dairy
         assert "vispikerma" in prompt
+
+
+class TestExtractPromptVariantRules:
+    """Prompt-content guard for the LIVE recipe scraping path.
+
+    The scraping pipeline uses _summarize_recipe → _extract_recipe_from_summary,
+    NOT _translate_ingredients. The 2.2.1 fix accidentally landed on the dead
+    code path. This test asserts the extract prompt — the one actually used
+    when recipes are imported — teaches the AI to preserve sugar variants.
+    """
+
+    def test_extract_prompt_recognises_swedish_sugar_variants(self, monkeypatch):
+        captured = {}
+
+        def fake_call(prompt):
+            captured["prompt"] = prompt
+            return {"name": "x", "servings": 1, "ingredients": [], "instructions": []}
+
+        monkeypatch.setattr(backend, "_call_ai_json", fake_call)
+
+        backend._extract_recipe_from_summary("dummy summary", "https://example.com", None)
+
+        prompt = captured["prompt"]
+        # Finnish variant target names for the two collapsing cases
+        assert "hillosokeri" in prompt, "extract prompt must name hillosokeri (jam sugar)"
+        assert "vaniljasokeri" in prompt, "extract prompt must name vaniljasokeri (vanilla sugar)"
+        # Swedish source words the AI sees from _summarize_recipe must be enumerated
+        assert "syltsocker" in prompt, "extract prompt must name 'syltsocker' as the Swedish source word"
+        assert "vaniljsocker" in prompt, "extract prompt must name 'vaniljsocker' as the Swedish source word"
