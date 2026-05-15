@@ -1363,7 +1363,8 @@ CRITICAL LANGUAGE RULES:
   "onion" → "sipuli", "garlic" → "valkosipuli", "carrot" → "porkkana"
 - "name" is the GENERIC category in Finnish (e.g. "kananmuna" not "3 kananmunaa", "juusto" not "Parmesan-juusto")
 - "specific" is the Finnish-translated variant name when the recipe names a sub-type the household would not treat as interchangeable; otherwise null.
-- The recipe name and instructions should stay in the original language.
+- The recipe name stays in the original language of the source page.
+- Instructions: ALWAYS translate to English, regardless of the source language. Each step in the "instructions" array must read as natural English prose. Keep Finnish/Swedish ingredient names referenced inside the step (e.g. "Mix the vehnäjauho and bakpulver") OPTIONAL — prefer the English term ("Mix the flour and baking powder") for the cleanest reading. Do not include numbering prefixes ("1. ", "Step 1:"); the frontend renders the order.
 
 SPECIFICITY RULES (CRITICAL — drives stock matching):
 - Set "specific" to null when the source uses a plain generic term: "cheese", "juustoa", "ost", "salt", "flour", "oil", "butter", "milk", "sokeri", "socker", "strösocker", "sugar", "smör", "pasta", "ruisleipä".

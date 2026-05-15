@@ -1,3 +1,6 @@
+## 2.2.8
+- Recipe instructions are now always extracted in English regardless of the source language. Ingredient names stay in Finnish (no change) and the recipe title stays in the source language (no change). The "OHJEET" section header is a frontend label and is unaffected. Re-import a recipe to refresh its instructions to English.
+
 ## 2.2.7
 - Strip leading numbering ("1. ", "2) ", "3- ") from instruction strings after extraction. The summarize prompt asks Gemini to number steps so it preserves order, but the extract step carried those prefixes into the instructions array and the frontend's `<ol>` rendered them doubled ("1. 1. Sätt ugnen...").
 - Remove the DIAG/summarize, DIAG/extract, and DIAG/childstub log scaffolding from 2.2.4/2.2.5 now that the variant pipeline is confirmed working end-to-end on the rabarberpaj recipe.

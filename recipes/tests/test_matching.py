@@ -217,6 +217,22 @@ class TestExtractPromptVariantRules:
         assert "syltsocker" in prompt, "extract prompt must name 'syltsocker' as the Swedish source word"
         assert "vaniljsocker" in prompt, "extract prompt must name 'vaniljsocker' as the Swedish source word"
 
+    def test_extract_prompt_translates_instructions_to_english(self, monkeypatch):
+        captured = {}
+
+        def fake_call(prompt):
+            captured["prompt"] = prompt
+            return {"name": "x", "servings": 1, "ingredients": [], "instructions": []}
+
+        monkeypatch.setattr(backend, "_call_ai_json", fake_call)
+        backend._extract_recipe_from_summary("dummy", "https://example.com", None)
+
+        prompt = captured["prompt"].lower()
+        assert "translate to english" in prompt, (
+            "extract prompt must instruct the model to translate instructions to English"
+        )
+        assert "instructions" in prompt
+
 
 class TestCreateChildStubsForUnmatchedSpecifics:
     """Auto-create child products for ingredients that matched a parent
