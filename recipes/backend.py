@@ -1215,7 +1215,12 @@ Return a JSON array, one object per ingredient:
 RULES:
 - Translate ALL ingredient names to Finnish (smör→voi, mjölk→maito, butter→voi, milk→maito, salt→suola, flour→vehnäjauho, egg→kananmuna, ägg→kananmuna, potato→peruna, lök→sipuli, vitlök→valkosipuli, etc.)
 - "name" is the generic category (e.g. "kananmuna" not "3 kananmunaa", "juusto" not "Parmesan")
-- "specific": set to a Finnish-translated variant ONLY when the source names a non-interchangeable sub-type (parmesan, gouda, juustoraaste, mozzarella, fetajuusto, oliiviöljy, ruisjauho, spaghetti, basmati, merisuolahiutaleet, …). Plain generics ("cheese", "salt", "flour", "oil") → specific=null.
+- "specific": Finnish-translated variant name when the source names a non-interchangeable sub-type, else null. Reasoning test: if a cook were to swap this variant for the plain generic and the recipe outcome would change (different texture, flavor, chemistry, fat content), the variant is non-interchangeable — set "specific". Be conservative: when in doubt, set "specific".
+  * Sugars: strösocker/socker/sugar → "sokeri", specific=null. syltsocker → specific="hillosokeri" (contains pectin). vaniljsocker/vaniljsukker → specific="vaniljasokeri". florsocker/florsukker/powdered sugar → specific="tomusokeri". farinsocker/brunt socker/brown sugar → specific="fariinisokeri". rörsocker/cane sugar → specific="ruokosokeri".
+  * Fats: smör/butter → "voi", specific=null. margarin → specific="margariini". osaltat smör/unsalted butter → specific="suolaton voi". olivolja/olive oil → specific="oliiviöljy". rapsolja → specific="rypsiöljy". kokosolja → specific="kookosöljy".
+  * Flours: vetemjöl/wheat flour → "vehnäjauho", specific=null. rågmjöl/rye → specific="ruisjauho". grahamsmjöl → specific="grahamjauho". potatismjöl → specific="perunajauho" (distinct from wheat). majsstärkelse/cornstarch → specific="maissitärkkelys". mandelmjöl → specific="mantelijauho". dinkelmjöl → specific="speltijauho".
+  * Dairy & misc: grädde/cream → "kerma", specific=null. vispgrädde → specific="vispikerma". matlagningsgrädde → specific="ruokakerma". crème fraîche → specific="crème fraîche". gräddfil/sour cream → specific="smetana". flingsalt/flake salt → specific="merisuolahiutaleet". whole peppercorns → specific="kokonainen mustapippuri".
+  * Cheese: plain "cheese"/"juusto" → null. Parmesan/gouda/mozzarella/feta → specific=<finnish name>.
 - Amount: extract the numeric quantity (float), or null if absent
 - PARENTHETICAL ANNOTATIONS: If a string contains a weight/calorie note in parentheses like "(ca 120 g)", "(about 180g)", "(500 kcal)" → IGNORE the parenthetical. Use only the primary amount/unit before it.
   Example: "2 ägg (ca 120 g)" → amount=2, unit="kpl" NOT amount=120, unit="g"
@@ -1239,6 +1244,9 @@ RULES:
   "salt" → name="suola", amount=null, unit=null
   "salta väl" → name="suola", amount=null, unit=null
   "peppar efter smak" → name="pippuri", amount=null, unit=null
+  "1 dl strösocker" → name="sokeri", specific=null, amount=1, unit="dl"
+  "1 dl syltsocker" → name="sokeri", specific="hillosokeri", amount=1, unit="dl"
+  "2 tsk vaniljsocker" → name="sokeri", specific="vaniljasokeri", amount=2, unit="tl"
 - Do NOT include any text outside the JSON array"""
 
     result = _call_ai_json(prompt)
