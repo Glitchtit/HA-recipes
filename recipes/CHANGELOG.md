@@ -1,3 +1,6 @@
+## 2.2.4
+- Diagnostic logging only. Adds `log.info("DIAG/summarize ...")` and `log.info("DIAG/extract ...")` around the AI scraping pipeline so we can see exactly what `_summarize_recipe` emits to disk and what `_extract_recipe_from_summary` produces (per-ingredient `name`, `specific`, `note`). Will be removed in 2.2.5 once the variant-preservation pipeline is confirmed working end-to-end.
+
 ## 2.2.3
 - Auto-create child product stubs for recipe ingredients that match a parent loosely but name a non-interchangeable specific variant. 2.2.1 + 2.2.2 fixed the AI prompts so the extract step emits `specific="hillosokeri"` / `specific="vaniljasokeri"`, but the matcher's fall-back-to-parent path silently dropped the variant — no child product was ever created. Now `_create_child_stubs_for_unmatched_specifics` runs after AI matching and scraper discovery, creating an inactive child under the matched parent (e.g. `Hillosokeri` under `Sokeri`) and re-binding the ingredient as strict. Re-import affected recipes to see the new bindings.
 

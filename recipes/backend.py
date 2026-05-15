@@ -1331,7 +1331,13 @@ Instructions:
 
 Write ONLY the clean recipe. No extra commentary, no markdown formatting."""
 
-    return _call_ai_text(prompt)
+    summary = _call_ai_text(prompt)
+    log.info(
+        "DIAG/summarize url=%s → summary=%r",
+        url,
+        (summary or "")[:3000],
+    )
+    return summary
 
 
 def _extract_recipe_from_summary(summary: str, url: str, image_url: str | None) -> dict:
@@ -1418,6 +1424,15 @@ UNIT RULES (CRITICAL — follow these exactly):
 
     if "ingredients" in result and isinstance(result["ingredients"], list):
         result["ingredients"] = _fix_countable_units(result["ingredients"])
+        ing_diag = [
+            {"name": i.get("name"), "specific": i.get("specific"), "note": i.get("note")}
+            for i in result["ingredients"] if isinstance(i, dict)
+        ]
+        log.info(
+            "DIAG/extract url=%s → ingredients=%s",
+            url,
+            json.dumps(ing_diag, ensure_ascii=False),
+        )
 
     result["source_url"] = url
     result["image_url"] = image_url
