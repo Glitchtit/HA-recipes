@@ -1326,7 +1326,7 @@ Instructions:
    - Keep amounts and units EXACTLY as written in the source — do not convert, translate, or add units
    - If an ingredient has NO unit written (just a number + item name, e.g. "2 ägg", "1 citron", "3 tomater"), write it EXACTLY as-is without adding any unit. Do NOT insert g, kg, ml, dl, or any other unit.
    - Examples: "2 ägg" → "2 ägg" (NOT "2 st ägg"), "1 citron" → "1 citron" (NOT "1 g citron")
-   - PRESERVE specific variants verbatim: write "parmesan", "gouda", "juustoraaste", "fetajuusto", "mozzarella", "ruisjauho", "ekstraneitsytoliiviöljy", "merisuolahiutaleet", etc. — do NOT collapse them to a generic ("cheese", "flour", "oil", "salt"). Translation to Finnish happens in the next step; here we just want the exact variant name from the source preserved.
+   - PRESERVE specific variants verbatim: write "parmesan", "gouda", "juustoraaste", "fetajuusto", "mozzarella", "ruisjauho", "ekstraneitsytoliiviöljy", "merisuolahiutaleet", "syltsocker", "vaniljsocker", "florsocker", "farinsocker", "vispgrädde", "matlagningsgrädde", "gräddfil", "margarin", etc. — do NOT collapse them to a generic ("cheese", "flour", "oil", "salt", "socker", "smör", "grädde"). Translation to Finnish happens in the next step; here we just want the exact variant name from the source preserved.
 4. List the cooking steps numbered 1, 2, 3...
 
 Write ONLY the clean recipe. No extra commentary, no markdown formatting."""
@@ -1366,15 +1366,17 @@ CRITICAL LANGUAGE RULES:
 - The recipe name and instructions should stay in the original language.
 
 SPECIFICITY RULES (CRITICAL — drives stock matching):
-- Set "specific" to null when the source uses a plain generic term: "cheese", "juustoa", "ost", "salt", "flour", "oil", "butter", "milk", "sokeri", "pasta", "ruisleipä".
-- Set "specific" to the Finnish variant when the source names a non-interchangeable sub-type:
+- Set "specific" to null when the source uses a plain generic term: "cheese", "juustoa", "ost", "salt", "flour", "oil", "butter", "milk", "sokeri", "socker", "strösocker", "sugar", "smör", "pasta", "ruisleipä".
+- Set "specific" to the Finnish variant when the source names a non-interchangeable sub-type. Reasoning test: if swapping the variant for the plain generic would change the recipe outcome (different texture, flavor, chemistry, fat content), set "specific". Be conservative — when in doubt, set "specific" rather than null.
   * Cheese variants: parmesan, gouda, mozzarella, fetajuusto, juustoraaste, halloumi, cheddar, edam, brie, sinihomejuusto
   * Salt: merisuola, merisuolahiutaleet (vs. plain suola → null)
-  * Flour: ruisjauho, kauraharitale, mantelijauho, kookosjauho (vs. plain vehnäjauho or "flour" → null)
+  * Flour: ruisjauho, grahamjauho, mantelijauho, kookosjauho, speltijauho (vs. plain vehnäjauho or "flour" → null)
   * Oil: oliiviöljy, rypsiöljy, seesamiöljy, kookosöljy (vs. plain "öljy" → null)
   * Pasta shapes: spaghetti, penne, fusilli, makaroni (vs. plain "pasta" → null)
   * Rice: basmati, arborio, jasmiiniriisi (vs. plain "riisi" → null)
-  * Sugar: tomusokeri, fariinisokeri, ruokosokeri (vs. plain "sokeri" → null)
+  * Sugar variants: tomusokeri (powdered / florsocker / florsukker), fariinisokeri (brown / farinsocker / brunt socker), ruokosokeri (cane / rörsocker), hillosokeri (JAM SUGAR — Swedish "syltsocker" / English "jam sugar" / contains pectin), vaniljasokeri (VANILLA SUGAR — Swedish "vaniljsocker" / "vaniljsukker" / English "vanilla sugar"). Plain "sokeri" / "socker" / "sugar" / "strösocker" → null.
+  * Butter & fats: margariini (margarine / margarin), suolaton voi (unsalted butter / osaltat smör). Plain "voi" / "smör" / "butter" → null.
+  * Cream & dairy: vispikerma (whipping cream / vispgrädde), ruokakerma (cooking cream / matlagningsgrädde), smetana (sour cream / gräddfil), crème fraîche. Plain "kerma" / "grädde" / "cream" → null.
   * Bread: ruisleipä, vaalealeipä (vs. plain "leipä" → null)
 - Examples:
   "freshly grated parmesan" → {{"name": "juusto", "specific": "parmesan"}}
@@ -1383,6 +1385,11 @@ SPECIFICITY RULES (CRITICAL — drives stock matching):
   "salt" → {{"name": "suola", "specific": null}}
   "merisuolahiutaleet" → {{"name": "suola", "specific": "merisuolahiutaleet"}}
   "200 g spaghetti" → {{"name": "pasta", "specific": "spaghetti"}}
+  "1 dl strösocker" → {{"name": "sokeri", "specific": null}}
+  "1 dl syltsocker" → {{"name": "sokeri", "specific": "hillosokeri"}}
+  "2 tsk vaniljsocker" → {{"name": "sokeri", "specific": "vaniljasokeri"}}
+  "2 dl vispgrädde" → {{"name": "kerma", "specific": "vispikerma"}}
+  "1 msk margarin" → {{"name": "voi", "specific": "margariini"}}
 
 "TO TASTE" RULE:
 - If a line in the summary starts with "to taste" (e.g. "to taste salt", "to taste pepper")
