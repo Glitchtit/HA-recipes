@@ -1,3 +1,6 @@
+## 2.2.11
+- Strict match now requires the AI's `specific` value to land on a real child product (parent_id ≠ null). When `specific` happens to equal a parent product's name (e.g. AI emits `specific="punasipuli"` and the catalog has parent `Punasipuli` with children like `Punasipuli 500g Suomi 2lk`), the match demotes to loose so child stock aggregates. Previously strict matches against a parent silently dropped all child stock from the status calculation. Re-import recipes to pick up the new binding.
+
 ## 2.2.10
 - Matcher now prefers active products when multiple share the same name. Previously the first match won regardless of `active` flag, so inactive auto-stub products from earlier scrapes could preempt a user-curated active product carrying the same name. Falls back to inactive if no active candidate exists (preserves behaviour for catalogs that haven't been activated yet).
 - Drop the 2.2.9 DIAG/recipestatus per-ingredient log scaffolding now that the inactive-product matching path is diagnosed and addressed.

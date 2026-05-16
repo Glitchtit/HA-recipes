@@ -75,14 +75,50 @@ class TestMatchIngredientSpecificity:
             "kvass", products, group_masters=group_masters,
         ) is None
 
+    def test_specific_matching_a_parent_demotes_to_loose(self, group_masters):
+        """When the AI's `specific` value happens to equal a PARENT product's
+        name (e.g. specific="punasipuli" and "Punasipuli" is a top-level
+        product with sub-variant children), stage 1 should return the parent
+        as LOOSE — not strict — so the downstream status calculation
+        aggregates child stock. Otherwise the user's only stocked variant
+        ("Punasipuli 500g Suomi 2lk") would be ignored."""
+        products = [
+            {"id": 1350, "name": "Punasipuli", "parent_id": None, "active": True},
+            {"id": 1351, "name": "Punasipuli 500g Suomi 2lk", "parent_id": 1350, "active": True},
+        ]
+        match = backend._match_ingredient(
+            "sipuli", products, group_masters=group_masters, specific="punasipuli",
+        )
+        assert match is not None
+        prod, spec = match
+        assert prod["id"] == 1350
+        assert spec == "loose"
+
+    def test_specific_matching_a_real_child_stays_strict(self, group_masters):
+        """The strict path stays strict when `specific` resolves to a true
+        child product (parent_id is set), so variant-aware matching keeps
+        working for things like parmesan/gouda under a Juusto parent."""
+        products = [
+            {"id": 1, "name": "Juusto", "parent_id": None, "active": True},
+            {"id": 2, "name": "Parmesan", "parent_id": 1, "active": True},
+        ]
+        match = backend._match_ingredient(
+            "juusto", products, group_masters=group_masters, specific="parmesan",
+        )
+        assert match is not None
+        prod, spec = match
+        assert prod["id"] == 2
+        assert spec == "strict"
+
     def test_prefers_active_when_duplicate_name(self, group_masters):
         """When two products share a name (typically: a user-curated active
         product and an auto-stub inactive product), prefer the active one
-        so stock state surfaces correctly."""
+        so stock state surfaces correctly. Both are parents here, so the
+        match is loose (see test_specific_matching_a_parent_demotes_to_loose)."""
         products = [
             # Inactive auto-stub created by an earlier scrape, listed first
             {"id": 1350, "name": "Punasipuli", "parent_id": None, "active": False},
-            # User's actual stocked Punasipuli, active
+            # User's actual curated Punasipuli, active
             {"id": 2000, "name": "Punasipuli", "parent_id": None, "active": True},
         ]
         match = backend._match_ingredient(
@@ -91,7 +127,7 @@ class TestMatchIngredientSpecificity:
         assert match is not None
         prod, spec = match
         assert prod["id"] == 2000
-        assert spec == "strict"
+        assert spec == "loose"
 
     def test_falls_back_to_inactive_when_no_active(self, group_masters):
         """If the only match is inactive, still return it (the user might

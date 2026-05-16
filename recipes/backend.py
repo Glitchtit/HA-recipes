@@ -1534,7 +1534,15 @@ def _match_ingredient(
         matches = [p for p in products if p["name"].lower().strip() == spec_lower]
         best = _prefer_active(matches)
         if best:
-            return best, "strict"
+            # Strict only when we actually landed on a child product (a real
+            # sub-variant). When `specific` happens to equal a parent's name
+            # (e.g. AI emits specific="punasipuli" and "Punasipuli" is a
+            # parent product with children like "Punasipuli 500g Suomi 2lk"),
+            # demote to loose so child stock aggregates. Otherwise the user's
+            # only stocked variant gets ignored under a strict binding.
+            if best.get("parent_id") is not None:
+                return best, "strict"
+            return best, "loose"
 
     # Stage 2: generic name → match against group-master/category products
     name_lower = name.lower().strip()
