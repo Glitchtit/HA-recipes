@@ -1,3 +1,7 @@
+## 2.2.10
+- Matcher now prefers active products when multiple share the same name. Previously the first match won regardless of `active` flag, so inactive auto-stub products from earlier scrapes could preempt a user-curated active product carrying the same name. Falls back to inactive if no active candidate exists (preserves behaviour for catalogs that haven't been activated yet).
+- Drop the 2.2.9 DIAG/recipestatus per-ingredient log scaffolding now that the inactive-product matching path is diagnosed and addressed.
+
 ## 2.2.9
 - Diagnostic logging only. Adds `log.info("DIAG/recipestatus ...")` in `_get_recipe_detail` that dumps the matched product (id, name, parent, active), the recipe's needed amount/unit, the resolved stock (amount, unit, amount_opened), the child-stock-converted total, and the final status for every ingredient on each recipe view. Used to diagnose mis-bound stock-state cases (e.g. Punasipuli marked red despite being in stock). Will be removed in 2.2.10.
 

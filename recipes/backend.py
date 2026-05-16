@@ -1514,26 +1514,42 @@ def _match_ingredient(
     """
     candidates = group_masters if group_masters is not None else products
 
+    def _prefer_active(matches: list[dict]) -> dict | None:
+        """Pick the active product when multiple share the same name.
+
+        Inactive products are typically auto-stubs from earlier scrapes;
+        they often have stock=0 and shouldn't preempt a user-curated
+        active product carrying the same name.
+        """
+        if not matches:
+            return None
+        for p in matches:
+            if p.get("active", True):
+                return p
+        return matches[0]
+
     # Stage 1: specific variant → try to find the exact child product
     if specific:
         spec_lower = specific.lower().strip()
-        for p in products:
-            if p["name"].lower().strip() == spec_lower:
-                return p, "strict"
+        matches = [p for p in products if p["name"].lower().strip() == spec_lower]
+        best = _prefer_active(matches)
+        if best:
+            return best, "strict"
 
     # Stage 2: generic name → match against group-master/category products
     name_lower = name.lower().strip()
-    for p in candidates:
-        if p["name"].lower().strip() == name_lower:
-            # Legacy: climb to parent when called without group_masters
-            if p.get("parent_id"):
-                parent = next(
-                    (pp for pp in products if pp["id"] == int(p["parent_id"])),
-                    None,
-                )
-                if parent:
-                    return parent, "loose"
-            return p, "loose"
+    matches = [p for p in candidates if p["name"].lower().strip() == name_lower]
+    best = _prefer_active(matches)
+    if best:
+        # Legacy: climb to parent when called without group_masters
+        if best.get("parent_id"):
+            parent = next(
+                (pp for pp in products if pp["id"] == int(best["parent_id"])),
+                None,
+            )
+            if parent:
+                return parent, "loose"
+        return best, "loose"
 
     return None
 
@@ -2124,15 +2140,6 @@ def _get_recipe_detail(recipe_id: int) -> dict:
             parent = products_by_id.get(int(parent_id))
             if parent:
                 parent_name = parent.get("name")
-
-        log.info(
-            "DIAG/recipestatus recipe=%s pid=%d name=%r parent=%s active=%s | needed=%s unit=%s(%s) | stock=%s unit=%s opened=%s | child_conv=%s | spec=%s → %s",
-            recipe_id, pid, product_name, parent_name, product.get("active"),
-            needed, unit_abbrev, recipe_unit_id,
-            in_stock_pieces, stock_unit_id, amount_opened,
-            child_stock_converted,
-            specificity, status,
-        )
 
         ingredients.append({
             "id": pos.get("id"),

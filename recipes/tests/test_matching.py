@@ -75,6 +75,38 @@ class TestMatchIngredientSpecificity:
             "kvass", products, group_masters=group_masters,
         ) is None
 
+    def test_prefers_active_when_duplicate_name(self, group_masters):
+        """When two products share a name (typically: a user-curated active
+        product and an auto-stub inactive product), prefer the active one
+        so stock state surfaces correctly."""
+        products = [
+            # Inactive auto-stub created by an earlier scrape, listed first
+            {"id": 1350, "name": "Punasipuli", "parent_id": None, "active": False},
+            # User's actual stocked Punasipuli, active
+            {"id": 2000, "name": "Punasipuli", "parent_id": None, "active": True},
+        ]
+        match = backend._match_ingredient(
+            "sipuli", products, group_masters=group_masters, specific="punasipuli",
+        )
+        assert match is not None
+        prod, spec = match
+        assert prod["id"] == 2000
+        assert spec == "strict"
+
+    def test_falls_back_to_inactive_when_no_active(self, group_masters):
+        """If the only match is inactive, still return it (the user might
+        activate it later). Keeps backwards compatibility for catalogs that
+        only have inactive auto-stubs."""
+        products = [
+            {"id": 1350, "name": "Punasipuli", "parent_id": None, "active": False},
+        ]
+        match = backend._match_ingredient(
+            "sipuli", products, group_masters=group_masters, specific="punasipuli",
+        )
+        assert match is not None
+        prod, _spec = match
+        assert prod["id"] == 1350
+
     def test_legacy_no_group_masters_still_climbs(self, products):
         # Calling without group_masters — exact-match against any product,
         # climbing to parent if matched a child. specific=None → loose.
