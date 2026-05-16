@@ -1,3 +1,6 @@
+## 2.2.12
+- Recipe status calc now walks children stock for strict matches that landed on a top-level parent product (parent_id=null). The 2.2.11 scrape-time fix demoted those to loose, but pre-2.2.11 recipes are still stored as `specificity="strict"` and would have stayed red until re-scrape. This view-time change auto-recovers them. Strict-on-CHILD (parent_id != null) keeps the no-aggregation semantic — gouda still does not satisfy strict parmesan.
+
 ## 2.2.11
 - Strict match now requires the AI's `specific` value to land on a real child product (parent_id ≠ null). When `specific` happens to equal a parent product's name (e.g. AI emits `specific="punasipuli"` and the catalog has parent `Punasipuli` with children like `Punasipuli 500g Suomi 2lk`), the match demotes to loose so child stock aggregates. Previously strict matches against a parent silently dropped all child stock from the status calculation. Re-import recipes to pick up the new binding.
 

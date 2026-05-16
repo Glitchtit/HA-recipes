@@ -474,3 +474,108 @@ class TestCreateChildStubsForUnmatchedSpecifics:
         assert body["name"] == "hillosokeri"
         assert ingredients[0]["_product_id"] == 200
         assert ingredients[0]["_specificity"] == "strict"
+
+
+class TestRecipeDetailStrictOnParentAggregates:
+    """`_get_recipe_detail` must aggregate children stock when a strict match
+    landed on a top-level parent product (parent_id=None). This recovers the
+    Punasipuli rabarberpaj case without re-scraping: the AI emitted
+    specific="punasipuli", the matcher bound the parent "Punasipuli" strictly
+    (pre-2.2.11 behaviour, still in stored recipes), and the user's child
+    products like "Punasipuli 500g Suomi 2lk" have the actual stock.
+
+    Strict-on-CHILD (parent_id != None) must still ignore siblings.
+    """
+
+    def _setup(self, monkeypatch, *, ingredient, recipe_unit_id, products, stock):
+        recipe_payload = {
+            "id": 99,
+            "name": "Test Recipe",
+            "description": "",
+            "source_url": "",
+            "servings": 1,
+            "picture_filename": None,
+            "ingredients": [
+                {
+                    **ingredient,
+                    "unit_id": recipe_unit_id,
+                    "unit_abbreviation": "kpl",
+                }
+            ],
+        }
+
+        def fake_api_get(path: str, **_kwargs):
+            if path == "recipes/99":
+                return recipe_payload
+            if path == "stock":
+                return stock
+            if path.startswith("products"):
+                return products
+            if path == "conversions":
+                return []
+            return []
+
+        monkeypatch.setattr(backend, "_api_get", fake_api_get)
+
+    def test_strict_on_parent_aggregates_children(self, monkeypatch):
+        """specificity=strict + matched a parent (parent_id=None) → walks
+        children's stock. Recovers pre-2.2.11 stored bindings."""
+        products = [
+            {"id": 100, "name": "Punasipuli", "parent_id": None, "unit_id": 8},
+            {"id": 101, "name": "Punasipuli 500g Suomi 2lk", "parent_id": 100, "unit_id": 8},
+            {"id": 102, "name": "Punasipuli Lavanttila", "parent_id": 100, "unit_id": 8},
+        ]
+        stock = [
+            {"product_id": 101, "amount": 1, "amount_opened": 0},
+            {"product_id": 102, "amount": 1, "amount_opened": 0},
+        ]
+        self._setup(
+            monkeypatch,
+            ingredient={
+                "id": 1, "product_id": 100, "product_name": "Punasipuli",
+                "amount": 1, "specificity": "strict", "note": "",
+            },
+            recipe_unit_id=8,
+            products=products,
+            stock=stock,
+        )
+
+        detail = backend._get_recipe_detail(99)
+        row = detail["ingredients"][0]
+        assert row["product_id"] == 100
+        assert row["specificity"] == "strict"
+        assert row["status"] == "green", (
+            f"Expected green (2 kpl aggregated from children ≥ 1 kpl needed), got {row['status']}"
+        )
+
+    def test_strict_on_child_does_not_aggregate_siblings(self, monkeypatch):
+        """specificity=strict + matched a child (parent_id != None) → no
+        aggregation, preserving the 'this exact variant only' semantic."""
+        products = [
+            {"id": 1, "name": "Juusto", "parent_id": None, "unit_id": 1},
+            {"id": 2, "name": "Parmesan", "parent_id": 1, "unit_id": 1},
+            {"id": 3, "name": "Gouda", "parent_id": 1, "unit_id": 1},
+        ]
+        stock = [
+            # No parmesan stock; lots of gouda. Strict on parmesan must
+            # NOT count gouda.
+            {"product_id": 3, "amount": 500, "amount_opened": 0},
+        ]
+        self._setup(
+            monkeypatch,
+            ingredient={
+                "id": 1, "product_id": 2, "product_name": "Parmesan",
+                "amount": 100, "specificity": "strict", "note": "",
+            },
+            recipe_unit_id=1,
+            products=products,
+            stock=stock,
+        )
+
+        detail = backend._get_recipe_detail(99)
+        row = detail["ingredients"][0]
+        assert row["product_id"] == 2
+        assert row["specificity"] == "strict"
+        assert row["status"] == "red", (
+            f"Expected red (gouda is a sibling, must not satisfy strict parmesan), got {row['status']}"
+        )

@@ -2056,7 +2056,19 @@ def _get_recipe_detail(recipe_id: int) -> dict:
         needed = pos.get("amount") or 0
         recipe_unit_id = pos.get("unit_id")
         specificity = pos.get("specificity", "loose")
-        aggregate_children = specificity != "strict"
+        # Aggregate children stock when:
+        #   • loose match (any sibling under the parent is acceptable), OR
+        #   • strict match landed on a TOP-LEVEL PARENT product (the recipe's
+        #     `specific` value matched the parent's name exactly — e.g.
+        #     specific="punasipuli" → parent product "Punasipuli". Children
+        #     like "Punasipuli 500g Suomi 2lk" are variants of the same
+        #     thing, so their stock should satisfy the requirement).
+        # Strict-on-CHILD (parent_id != None) preserves the no-aggregation
+        # semantic: that case is a genuine "this exact variant only".
+        aggregate_children = (
+            specificity != "strict"
+            or product.get("parent_id") is None
+        )
 
         stock_entry = stock_by_product.get(pid)
         in_stock_pieces = 0
