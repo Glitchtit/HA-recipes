@@ -8,6 +8,7 @@ import httpx
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.util.ssl import get_default_context
 
 from .const import (
     ADDON_SLUG_RECIPES_PATTERN,
@@ -25,7 +26,7 @@ async def _discover_addon_url() -> str | None:
     if not token:
         return None
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with httpx.AsyncClient(verify=get_default_context(), timeout=5) as client:
             r = await client.get(
                 f"http://supervisor/addons/{ADDON_SLUG_RECIPES_PATTERN}/info",
                 headers={"Authorization": f"Bearer {token}"},
@@ -44,7 +45,7 @@ async def _test_connection(url: str) -> bool:
     # The HA-recipes backend has no /api/health; /api/config always returns 200
     # when the backend is up, so use it as the reachability probe.
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with httpx.AsyncClient(verify=get_default_context(), timeout=5) as client:
             r = await client.get(f"{url.rstrip('/')}/api/config")
             return r.status_code == 200
     except Exception:  # noqa: BLE001

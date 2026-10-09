@@ -7,6 +7,7 @@ import re
 from typing import Iterable
 
 import httpx
+from homeassistant.util.ssl import get_default_context
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +15,7 @@ SUPERVISOR_BASE = "http://supervisor"
 
 
 async def _list_addons(token: str) -> list[dict]:
-    async with httpx.AsyncClient(timeout=5) as client:
+    async with httpx.AsyncClient(verify=get_default_context(), timeout=5) as client:
         r = await client.get(
             f"{SUPERVISOR_BASE}/addons",
             headers={"Authorization": f"Bearer {token}"},
@@ -24,7 +25,7 @@ async def _list_addons(token: str) -> list[dict]:
 
 
 async def _addon_info(token: str, slug: str) -> dict:
-    async with httpx.AsyncClient(timeout=5) as client:
+    async with httpx.AsyncClient(verify=get_default_context(), timeout=5) as client:
         r = await client.get(
             f"{SUPERVISOR_BASE}/addons/{slug}/info",
             headers={"Authorization": f"Bearer {token}"},
@@ -68,7 +69,7 @@ async def discover_addon_url(
             url = f"http://{host}:{port}"
             # Verify with a quick health probe, but don't fail discovery if 404
             try:
-                async with httpx.AsyncClient(timeout=3) as client:
+                async with httpx.AsyncClient(verify=get_default_context(), timeout=3) as client:
                     r = await client.get(f"{url}{health_path}")
                     if r.status_code < 500:
                         return url

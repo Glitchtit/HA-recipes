@@ -9,6 +9,7 @@ import logging
 from typing import Any
 
 import httpx
+from homeassistant.util.ssl import get_default_context
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class StorageClient:
 
     async def fetch_expiring_entries(self, days: int) -> list[dict[str, Any]]:
         """Stock lots whose best_before_date falls within `days` days."""
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(verify=get_default_context(), timeout=10) as client:
             r = await client.get(
                 f"{self.base_url}/api/stock/entries",
                 params={"expiring_within_days": int(days)},

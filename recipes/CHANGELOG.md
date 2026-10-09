@@ -1,3 +1,7 @@
+## 2.6.1
+
+- Integration 0.1.1: no more "Detected blocking call to load_verify_locations" warnings at Home Assistant startup. HTTP clients now reuse Home Assistant's pre-built SSL context instead of loading the certificate bundle inside the event loop
+
 ## 2.6.0
 
 - Scraping Cloudflare-protected recipe sites (k-ruoka.fi) no longer fails with 403: set the new `flaresolverr_url` option (same FlareSolverr instance HA-scraper uses) and blocked pages are fetched through it automatically
