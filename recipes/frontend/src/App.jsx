@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import WhatsNewModal from './components/WhatsNewModal';
+import IngredientFixSheet from './IngredientFixSheet';
+import { formatQty, haveText, recipeBadge, skippedText, sortRecipes } from './recipeHelpers';
 
 // ---------------------------------------------------------------------------
 // Ingress-path awareness
@@ -66,6 +68,7 @@ function Toasts({ toasts }) {
 // ---------------------------------------------------------------------------
 function RecipeCard({ recipe, onClick }) {
   const imgUrl = recipeImageUrl(recipe.picture_filename);
+  const badge = recipeBadge(recipe);
   return (
     <button
       onClick={onClick}
@@ -84,6 +87,15 @@ function RecipeCard({ recipe, onClick }) {
             🍽️
           </div>
         )}
+        {badge && (
+          <span
+            className={`absolute top-2 right-2 px-2 py-0.5 rounded-full text-xs font-semibold ${
+              badge.tone === 'ok' ? 'bg-emerald-900/80 text-emerald-300' : 'bg-red-900/80 text-red-300'
+            }`}
+          >
+            {badge.text}
+          </span>
+        )}
       </div>
       <div className="p-3">
         <h3 className="font-semibold text-gray-100 text-sm line-clamp-2">
@@ -100,15 +112,11 @@ function RecipeCard({ recipe, onClick }) {
 // ---------------------------------------------------------------------------
 // RecipeDetail — full-screen overlay
 // ---------------------------------------------------------------------------
-function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, onReimport, reimporting, onToast }) {
-  if (!recipe) return null;
-
-  const imgUrl = recipeImageUrl(recipe.picture_filename);
-  const hasOpened = recipe.ingredients?.some(
-    (i) => i.status === 'yellow',
-  );
-
+function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, onReimport, reimporting, onToast, onFixed }) {
+  // Every hook runs before the early return below (rules of hooks).
+  const [fixing, setFixing] = useState(null);
   const [printing, setPrinting] = useState(false);
+  const imgUrl = recipe ? recipeImageUrl(recipe.picture_filename) : null;
   const handlePrint = useCallback(async () => {
     if (printing) return;
     setPrinting(true);
@@ -150,7 +158,13 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, 
     }
   }, [recipe, imgUrl, printing, onToast]);
 
+  if (!recipe) return null;
+  const hasOpened = recipe.ingredients?.some(
+    (i) => i.status === 'yellow',
+  );
+
   return (
+    <>
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overlay-enter overflow-y-auto py-4"
       onClick={onClose}
@@ -209,28 +223,34 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, 
           </h3>
           <ul className="space-y-1">
             {recipe.ingredients?.map((ing) => (
-              <li
-                key={ing.id}
-                title={ing.raw_text || undefined}
-                className={`text-sm px-3 py-2 rounded-lg ${
-                  ing.status === 'green'
-                    ? 'bg-brand-orange text-white'
-                    : ing.status === 'yellow'
-                      ? 'bg-amber-900/40 text-amber-300'
-                      : 'bg-red-900/40 text-red-300'
-                }`}
-              >
-                <span className="font-medium">{ing.product_name}</span>
-                {ing.amount_needed > 0 ? (
-                  <span className="text-xs opacity-70 ml-2">
-                    — {ing.amount_needed}{ing.unit_abbrev ? ` ${ing.unit_abbrev}` : ' kpl'}
-                  </span>
-                ) : (
-                  <span className="text-xs opacity-70 ml-2">— maun mukaan</span>
-                )}
-                {ing.needs_review && (
-                  <span className="ml-2" title="Yksikköä ei tunnistettu, tarkista määrä">⚠</span>
-                )}
+              <li key={ing.id}>
+                <button
+                  type="button"
+                  onClick={() => setFixing(ing)}
+                  title={ing.raw_text || 'Korjaa ainesosa'}
+                  className={`w-full text-left text-sm px-3 py-2 rounded-lg ${
+                    ing.status === 'green'
+                      ? 'bg-brand-orange text-white'
+                      : ing.status === 'yellow'
+                        ? 'bg-amber-900/40 text-amber-300'
+                        : 'bg-red-900/40 text-red-300'
+                  }`}
+                >
+                  <span className="font-medium">{ing.product_name}</span>
+                  {ing.amount_needed > 0 ? (
+                    <span className="text-xs opacity-70 ml-2">
+                      — {formatQty(ing.amount_needed, ing.unit_abbrev || 'kpl')}
+                    </span>
+                  ) : (
+                    <span className="text-xs opacity-70 ml-2">— maun mukaan</span>
+                  )}
+                  {haveText(ing) && (
+                    <span className="text-xs opacity-70 ml-2">· {haveText(ing)}</span>
+                  )}
+                  {ing.needs_review && (
+                    <span className="ml-2" title="Yksikköä ei tunnistettu, tarkista määrä">⚠</span>
+                  )}
+                </button>
               </li>
             ))}
           </ul>
@@ -289,6 +309,17 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, 
         </div>
       </div>
     </div>
+    {fixing && (
+      <IngredientFixSheet
+        apiStorage={API_STORAGE}
+        recipeId={recipe.id}
+        ingredient={fixing}
+        onClose={() => setFixing(null)}
+        onSaved={() => { setFixing(null); onFixed?.(); }}
+        onToast={onToast}
+      />
+    )}
+    </>
   );
 }
 
@@ -821,6 +852,7 @@ export default function App() {
       });
       if (data.success) {
         addToast(`Resepti "${data.name}" tallennettu!`, 'success');
+        if (data.skipped?.length) addToast(skippedText(data.skipped), 'info');
         setUrl('');
         loadRecipes();
       } else {
@@ -857,6 +889,17 @@ export default function App() {
     },
     [addToast],
   );
+
+  // Reload the open recipe in place (after an ingredient fix), without the
+  // loading overlay.
+  const refreshRecipe = useCallback(async (id) => {
+    try {
+      const { data } = await axios.get(`${API_BACKEND}/recipe/${id}`);
+      if (data.success) setRecipeDetail(data.recipe);
+    } catch {
+      addToast('Reseptin päivitys epäonnistui', 'error');
+    }
+  }, [addToast]);
 
   const closeDetail = useCallback(() => {
     setSelectedRecipeId(null);
@@ -955,6 +998,7 @@ export default function App() {
       if (data.success) {
         const review = data.needs_review ? `, ${data.needs_review} tarkistettavaa` : '';
         addToast(`Ainekset päivitetty lähteestä (${data.ingredients} ainesta${review})`, 'success');
+        if (data.skipped?.length) addToast(skippedText(data.skipped), 'info');
         openRecipe(recipeDetail.id);
         loadRecipes();
       } else {
@@ -1198,7 +1242,7 @@ export default function App() {
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                {recipes.map((r) => (
+                {sortRecipes(recipes).map((r) => (
                   <RecipeCard
                     key={r.id}
                     recipe={r}
@@ -1249,6 +1293,7 @@ export default function App() {
           onReimport={handleReimport}
           reimporting={reimporting}
           onToast={addToast}
+          onFixed={() => { refreshRecipe(recipeDetail.id); loadRecipes(); }}
         />
       )}
 
