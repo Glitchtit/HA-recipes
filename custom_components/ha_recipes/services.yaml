@@ -1,7 +1,7 @@
 search:
   name: Search recipes
   description: >
-    Search saved recipes by name or ingredient. Returns the matching recipes
+    Search saved recipes by name. Returns the matching recipes
     (id, name, servings). Use this to find a recipe the household has saved
     before, e.g. "do we have a pannukakku recipe". If nothing matches (the
     household hasn't saved it), import one from the web with
@@ -18,9 +18,9 @@ search:
 scrape_url:
   name: Import recipe from URL
   description: >
-    Import a recipe from a web URL; returns the parsed recipe (name, servings,
-    ingredients, instructions) and which Storage products match its ingredients.
-    Runs the full AI scrape-and-match pipeline and can take up to a minute.
+    Import a recipe from a web URL. Storage binds every ingredient line to a
+    product; returns the new recipe's id and name, and any lines it could not
+    read (skipped). Runs the full AI pipeline and can take up to a minute.
   fields:
     url:
       name: Recipe URL
@@ -36,8 +36,9 @@ suggest_from_stock:
     Suggest recipes you can cook RIGHT NOW from what is in stock. Example:
     "what can I cook tonight" or "what can I make with what is expiring". Set
     expiring_only to prioritise items about to go off. Needs no input — it reads
-    your Storage stock. Returns a response: a list of suggested recipes with id,
-    name, and which in-stock items each uses.
+    your Storage stock. Returns a response: the cookable recipes (id, name,
+    servings), those using stock that expires soon first, each with
+    uses_expiring and the expiring ingredients (expiring_products).
   fields:
     expiring_only:
       name: Expiring only

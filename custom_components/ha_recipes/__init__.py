@@ -95,13 +95,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             raise HomeAssistantError(f"Scrape failed: {exc}") from exc
 
     async def _suggest_service(call: ServiceCall) -> dict:
-        if recipes is None:
+        if storage is None:
             raise HomeAssistantError(
-                "HA-recipes add-on was not auto-discovered; cannot suggest recipes."
+                "HA-storage add-on was not auto-discovered; cannot suggest recipes."
             )
         try:
             return await run_suggest(
-                recipes,
                 storage,
                 expiring_only=call.data.get("expiring_only", False),
                 days=call.data.get("days"),

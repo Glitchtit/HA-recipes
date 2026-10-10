@@ -50,52 +50,47 @@ def test_run_scrape_passes_url_and_returns_payload():
 
 
 class FakeStorage:
-    def __init__(self, stock=None, expiring=None):
-        self._stock = stock or []
-        self._expiring = expiring or []
+    """Answers like HA-storage GET /api/recipes/suggest?expiring_within_days=N."""
 
-    async def fetch_expiring_entries(self, days):
-        self._days = days
-        return self._expiring
+    def __init__(self, suggestions=None):
+        self._suggestions = suggestions or []
+        self.days = None
 
-
-def _details():
-    return {
-        1: {"id": 1, "name": "All green", "ingredients": [
-            {"product_id": 10, "status": "green"}]},
-        2: {"id": 2, "name": "Has red", "ingredients": [
-            {"product_id": 10, "status": "green"}, {"product_id": 11, "status": "red"}]},
-        3: {"id": 3, "name": "Yellow expiring", "ingredients": [
-            {"product_id": 12, "status": "yellow"}]},
-    }
+    async def suggest_recipes(self, days):
+        self.days = days
+        return self._suggestions
 
 
-def test_run_suggest_returns_only_cookable_ranked():
-    fake = FakeRecipes(
-        list_result=[{"id": 1}, {"id": 2}, {"id": 3}],
-        details=_details(),
-    )
-    storage = FakeStorage(stock=[{"product_id": 10, "amount": 1}])
-    out = asyncio.run(helpers.run_suggest(
-        fake, storage, expiring_only=False, days=None))
-    # recipe 2 dropped (red); 1 (all green) ranked before 3 (yellow)
-    assert [r["id"] for r in out["recipes"]] == [1, 3]
-    assert out["count"] == 2
-    assert out["expiring_only"] is False
+SUGGESTIONS = [
+    {"id": 3, "name": "Kermaperunat", "servings": 4, "picture_filename": None,
+     "source_url": "https://example.com/3", "missing_count": 0, "yellow_count": 1,
+     "uses_expiring": True, "expiring_products": ["Kerma"]},
+    {"id": 1, "name": "Pannukakku", "servings": 6, "picture_filename": "p.jpg",
+     "source_url": None, "missing_count": 0, "yellow_count": 0,
+     "uses_expiring": False, "expiring_products": []},
+]
 
 
-def test_run_suggest_expiring_only_filters_to_expiring_products():
-    fake = FakeRecipes(
-        list_result=[{"id": 1}, {"id": 3}],
-        details=_details(),
-    )
-    # only product 12 is expiring -> recipe 3 qualifies, recipe 1 (prod 10) does not
-    storage = FakeStorage(
-        stock=[{"product_id": 10, "amount": 1}, {"product_id": 12, "amount": 1}],
-        expiring=[{"product_id": 12, "best_before_date": "2026-05-26"}],
-    )
-    out = asyncio.run(helpers.run_suggest(
-        fake, storage, expiring_only=True, days=3))
+def test_run_suggest_asks_storage_and_keeps_its_order():
+    storage = FakeStorage(SUGGESTIONS)
+    out = asyncio.run(helpers.run_suggest(storage))
+    assert storage.days == 7
+    assert out == {"count": 2, "expiring_only": False, "recipes": [
+        {"id": 3, "name": "Kermaperunat", "servings": 4, "picture_filename": None,
+         "source_url": "https://example.com/3", "uses_expiring": True, "expiring_products": ["Kerma"]},
+        {"id": 1, "name": "Pannukakku", "servings": 6, "picture_filename": "p.jpg",
+         "source_url": None, "uses_expiring": False, "expiring_products": []},
+    ]}
+
+
+def test_run_suggest_expiring_only_keeps_recipes_using_expiring_stock():
+    storage = FakeStorage(SUGGESTIONS)
+    out = asyncio.run(helpers.run_suggest(storage, expiring_only=True, days=3))
+    assert storage.days == 3
     assert [r["id"] for r in out["recipes"]] == [3]
-    assert storage._days == 3
     assert out["expiring_only"] is True
+
+
+def test_run_suggest_needs_storage():
+    with pytest.raises(RuntimeError, match="HA-storage"):
+        asyncio.run(helpers.run_suggest(None))

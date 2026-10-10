@@ -1,7 +1,7 @@
-"""Lightweight client for the HA-storage add-on (stock lookups).
+"""Lightweight client for the HA-storage add-on (recipe suggestions).
 
-Routes (confirmed against HA-storage/storage/app/routers/stock.py):
-  GET /api/stock/entries?expiring_within_days -> list[StockEntryWithProduct]
+Routes (HA-storage/storage/app/routers/recipes.py, Storage 0.27.0+):
+  GET /api/recipes/suggest?expiring_within_days -> list[RecipeSuggestion]
 """
 from __future__ import annotations
 
@@ -26,11 +26,11 @@ class StorageClient:
     def __init__(self, base_url: str) -> None:
         self.base_url = base_url.rstrip("/")
 
-    async def fetch_expiring_entries(self, days: int) -> list[dict[str, Any]]:
-        """Stock lots whose best_before_date falls within `days` days."""
-        async with httpx.AsyncClient(verify=get_default_context(), timeout=10) as client:
+    async def suggest_recipes(self, days: int) -> list[dict[str, Any]]:
+        """Recipes cookable from stock, those using stock expiring within `days` first."""
+        async with httpx.AsyncClient(verify=get_default_context(), timeout=20) as client:
             r = await client.get(
-                f"{self.base_url}/api/stock/entries",
+                f"{self.base_url}/api/recipes/suggest",
                 params={"expiring_within_days": int(days)},
             )
             r.raise_for_status()

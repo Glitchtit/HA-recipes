@@ -1,3 +1,11 @@
+## 2.9.0
+
+- Recipe cards show ✓ when everything is in stock or "n puuttuu" for the missing ingredients, and cookable recipes come first. Requires HA-storage 0.27.0
+- Tap an ingredient to fix it: pick the right ingredient by search, choose "any variant" or "exactly this", and correct the amount and unit. Saving can remember the recipe's word for it, so the next import and a re-import bind it right
+- Ingredient rows show amounts with a decimal comma and, when you have only part of what is needed, how much you have ("on 1 dl")
+- An import or re-import names the lines it could not read instead of dropping them silently
+- Integration 0.2.0: `ha_recipes.suggest_from_stock` asks Storage, which counts stock under each ingredient, so "expiring only" finds recipes whose ingredients are generic items; each suggestion says which ingredients expire soon
+
 ## 2.8.2
 
 - Milk of any fat level (täysmaito, kevytmaito, standardmjölk…) imports as plain milk, so a recipe finds the milk you have instead of asking for one fat level
