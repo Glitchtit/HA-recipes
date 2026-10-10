@@ -505,10 +505,11 @@ _COUNTABLE_KEYWORDS = {
 
 
 def _fix_countable_units(ingredients: list[dict]) -> list[dict]:
-    """Post-processor: force unit=kpl for countable items when AI returns g/kg with small count.
+    """Post-processor: force unit=kpl for countable items when AI returns grams with small count.
 
     Prevents "2 kananmuna" being stored as "2 g kananmuna" which is nonsensical.
     Only triggers when amount <= 50 (larger values are plausible weights).
+    Kilograms are left alone: "1 kg perunoita" is a real weight.
     """
     for ing in ingredients:
         if not isinstance(ing, dict):
@@ -516,7 +517,7 @@ def _fix_countable_units(ingredients: list[dict]) -> list[dict]:
         name = (ing.get("name") or "").lower()
         unit = (ing.get("unit") or "").lower()
         amount = ing.get("amount")
-        if unit in ("g", "kg") and amount is not None and float(amount) <= 50:
+        if unit == "g" and amount is not None and float(amount) <= 50:
             if any(kw in name for kw in _COUNTABLE_KEYWORDS):
                 log.info("_fix_countable_units: %s %s %s → kpl", amount, unit, name)
                 ing["unit"] = "kpl"

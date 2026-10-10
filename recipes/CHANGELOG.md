@@ -1,3 +1,7 @@
+## 2.8.1
+
+- An ingredient given in kilograms keeps its kilograms: "1 kg potatis" no longer imports as 1 potato. Only an implausible gram amount of a countable item ("1 g lime") still becomes pieces
+
 ## 2.8.0
 
 - Importing a recipe asks Storage which product each ingredient is: known words bind directly, the same ingredient in another language or spelling binds to the product you already have, and only a genuinely new ingredient becomes a new one; no more duplicate stubs or scraper products added for unknown ingredients. Requires HA-storage 0.26.0

@@ -105,3 +105,14 @@ def test_matching_stub_density_and_scraper_code_is_gone():
                  "_ensure_density_conversions", "_ensure_units_and_conversions",
                  "_scraper_discover", "_batch_translate_to_finnish", "_translate_ingredients"):
         assert not hasattr(backend, name), name
+
+
+def test_kilograms_of_a_countable_item_stay_kilograms():
+    """Live finding (re-import): "1 kg peruna-sipulisekoitusta" and "1 kg
+    mjölig potatis" became 1 kpl. A kilogram amount is always a small number;
+    only an implausible gram amount ("1 g lime") means pieces."""
+    out = backend._fix_countable_units([
+        {"name": "peruna", "amount": 1, "unit": "kg"},
+        {"name": "lime", "amount": 1, "unit": "g"},
+    ])
+    assert [i["unit"] for i in out] == ["kg", "kpl"]
