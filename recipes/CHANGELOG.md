@@ -1,3 +1,7 @@
+## 2.8.2
+
+- Milk of any fat level (täysmaito, kevytmaito, standardmjölk…) imports as plain milk, so a recipe finds the milk you have instead of asking for one fat level
+
 ## 2.8.1
 
 - An ingredient given in kilograms keeps its kilograms: "1 kg potatis" no longer imports as 1 potato. Only an implausible gram amount of a countable item ("1 g lime") still becomes pieces

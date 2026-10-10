@@ -116,3 +116,19 @@ def test_kilograms_of_a_countable_item_stay_kilograms():
         {"name": "lime", "amount": 1, "unit": "g"},
     ])
     assert [i["unit"] for i in out] == ["kg", "kpl"]
+
+
+def test_extract_prompt_treats_milk_fat_levels_as_plain_milk(monkeypatch):
+    """Live finding (re-import): "Arla Ko® Standardmjölk" became the variant
+    "Täysmaito" in one run and plain "maito" in the next. Milk fat levels are
+    interchangeable in cooking, so the prompt names them as generic milk."""
+    captured = {}
+
+    def fake_call(prompt):
+        captured["prompt"] = prompt
+        return {"name": "x", "servings": 1, "ingredients": [], "instructions": []}
+
+    monkeypatch.setattr(backend, "_call_ai_json", fake_call)
+    backend._extract_recipe_from_summary("dummy", "https://example.com", None)
+    rule = next(line for line in captured["prompt"].splitlines() if "standardmjölk" in line)
+    assert "täysmaito" in rule and "kevytmaito" in rule and "null" in rule

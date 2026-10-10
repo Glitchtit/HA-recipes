@@ -602,6 +602,7 @@ SPECIFICITY RULES (CRITICAL — drives stock matching):
   * Sugar variants: tomusokeri (powdered / florsocker / florsukker), fariinisokeri (brown / farinsocker / brunt socker), ruokosokeri (cane / rörsocker), hillosokeri (JAM SUGAR — Swedish "syltsocker" / English "jam sugar" / contains pectin), vaniljasokeri (VANILLA SUGAR — Swedish "vaniljsocker" / "vaniljsukker" / English "vanilla sugar"). Plain "sokeri" / "socker" / "sugar" / "strösocker" → null.
   * Butter & fats: margariini (margarine / margarin), suolaton voi (unsalted butter / osaltat smör). Plain "voi" / "smör" / "butter" → null.
   * Cream & dairy: vispikerma (whipping cream / vispgrädde), ruokakerma (cooking cream / matlagningsgrädde), smetana (sour cream / gräddfil), crème fraîche. Plain "kerma" / "grädde" / "cream" → null.
+  * Milk fat levels are interchangeable in cooking → name "maito", specific null: täysmaito, kevytmaito, rasvaton maito, standardmjölk, mellanmjölk, lättmjölk, whole / low-fat / skim milk (a brand name like "Arla Ko®" does not make it specific).
   * Bread: ruisleipä, vaalealeipä (vs. plain "leipä" → null)
 - Examples:
   "freshly grated parmesan" → {{"name": "juusto", "specific": "parmesan"}}
