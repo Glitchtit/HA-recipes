@@ -13,7 +13,6 @@ import re
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from typing import Any
@@ -348,545 +347,6 @@ def _api_delete(path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Quantity unit management
-# ---------------------------------------------------------------------------
-
-# Standard recipe units with Finnish names
-_STANDARD_UNITS = [
-    {"name": "Gramma", "name_plural": "Grammaa", "abbreviation": "g"},
-    {"name": "Kilogramma", "name_plural": "Kilogrammaa", "abbreviation": "kg"},
-    {"name": "Millilitra", "name_plural": "Millilitraa", "abbreviation": "ml"},
-    {"name": "Desilitra", "name_plural": "Desilitraa", "abbreviation": "dl"},
-    {"name": "Litra", "name_plural": "Litraa", "abbreviation": "l"},
-    {"name": "Teelusikka", "name_plural": "Teelusikkaa", "abbreviation": "tl"},
-    {"name": "Ruokalusikka", "name_plural": "Ruokalusikkaa", "abbreviation": "rkl"},
-    {"name": "Ripaus", "name_plural": "Ripausta", "abbreviation": "rs"},
-    {"name": "Kappale", "name_plural": "Kappaletta", "abbreviation": "kpl"},
-]
-
-# Global conversions between compatible units: (from_abbrev, to_abbrev, factor)
-# "1 <from> = <factor> <to>"
-_GLOBAL_CONVERSIONS = [
-    ("kg", "g", 1000),
-    ("l", "dl", 10),
-    ("l", "ml", 1000),
-    ("dl", "ml", 100),
-    ("rkl", "ml", 15),
-    ("tl", "ml", 5),
-]
-
-# Map common unit string variations to canonical abbreviation
-_UNIT_ALIASES: dict[str, str] = {
-    "g": "g", "gr": "g", "gram": "g", "gramma": "g",
-    "kg": "kg", "kilo": "kg", "kilogramma": "kg",
-    "ml": "ml", "millilitra": "ml",
-    "dl": "dl", "desilitra": "dl",
-    "l": "l", "litra": "l",
-    "tl": "tl", "teelusikka": "tl",
-    "rkl": "rkl", "ruokalusikka": "rkl",
-    "rs": "rs", "ripaus": "rs",
-    "kpl": "kpl", "kappale": "kpl", "pcs": "kpl", "piece": "kpl", "st": "kpl",
-}
-
-# Unit domain sets for cross-domain detection
-_WEIGHT_UNITS = {"g", "kg"}
-_VOLUME_UNITS = {"ml", "dl", "l", "tl", "rkl"}
-
-# Normalisation factors (relative to base: kg for weight, l for volume)
-_WEIGHT_FACTORS = {"kg": 1.0, "g": 1000.0}  # 1 kg = 1000 g
-_VOLUME_FACTORS = {"l": 1.0, "dl": 10.0, "ml": 1000.0}  # 1 l = 10 dl = 1000 ml
-
-# Cache: abbreviation → unit ID
-_unit_map: dict[str, int] | None = None
-_unit_map_lock = threading.Lock()
-
-
-def _ensure_units_and_conversions() -> dict[str, int]:
-    """Ensure standard recipe units and global conversions exist in Storage.
-
-    Returns a mapping of unit abbreviation → unit ID.
-    Idempotent — skips units/conversions that already exist.
-    """
-    global _unit_map
-    with _unit_map_lock:
-        if _unit_map is not None:
-            return _unit_map
-
-        existing_units = _api_get("units")
-        existing_by_abbrev = {}
-        existing_by_name = {}
-        for u in existing_units:
-            if u.get("abbreviation"):
-                existing_by_abbrev[u["abbreviation"].lower().strip()] = u["id"]
-            if u.get("name"):
-                existing_by_name[u["name"].lower().strip()] = u["id"]
-
-        abbrev_to_id: dict[str, int] = {}
-
-        for unit_def in _STANDARD_UNITS:
-            abbrev = unit_def["abbreviation"]
-            # Check if unit already exists (by abbreviation or name)
-            uid = existing_by_abbrev.get(abbrev.lower())
-            if uid is None:
-                uid = existing_by_name.get(unit_def["name"].lower())
-            if uid is None:
-                try:
-                    resp = _api_post("units", {
-                        "name": unit_def["name"],
-                        "abbreviation": abbrev,
-                        "name_plural": unit_def["name_plural"],
-                    })
-                    uid = int(resp.get("id", 0))
-                    log.debug("Created unit '%s' (ID %d)", unit_def["name"], uid)
-                except Exception as exc:
-                    log.warning("Failed to create unit '%s': %s", unit_def["name"], exc)
-                    continue
-            abbrev_to_id[abbrev] = uid
-
-        # Also map the "Piece"/"Pack" defaults if they exist
-        for u in existing_units:
-            name_lower = (u.get("name") or "").lower().strip()
-            if name_lower in ("piece", "pack", "stück", "kappale"):
-                abbrev_to_id.setdefault("piece", u["id"])
-            abbrev_lower = (u.get("abbreviation") or "").lower().strip()
-            if abbrev_lower == "kpl":
-                abbrev_to_id.setdefault("piece", u["id"])
-
-        # Create global conversions
-        existing_conversions = _api_get("conversions")
-        conv_set = set()
-        for c in existing_conversions:
-            if c.get("product_id") is None:
-                conv_set.add((int(c["from_unit_id"]), int(c["to_unit_id"])))
-
-        for from_abbrev, to_abbrev, factor in _GLOBAL_CONVERSIONS:
-            from_id = abbrev_to_id.get(from_abbrev)
-            to_id = abbrev_to_id.get(to_abbrev)
-            if from_id is None or to_id is None:
-                continue
-            if (from_id, to_id) in conv_set:
-                continue
-            try:
-                _api_post("conversions", {
-                    "from_unit_id": from_id,
-                    "to_unit_id": to_id,
-                    "factor": factor,
-                })
-                log.debug("Created global conversion: 1 %s = %s %s", from_abbrev, factor, to_abbrev)
-            except Exception as exc:
-                log.warning("Failed to create conversion %s→%s: %s", from_abbrev, to_abbrev, exc)
-
-        _unit_map = abbrev_to_id
-        log.debug("Unit map initialised: %s", {k: v for k, v in abbrev_to_id.items()})
-        return _unit_map
-
-
-def _get_unit_map() -> dict[str, int]:
-    """Get the cached unit abbreviation → ID mapping, initialising if needed."""
-    if _unit_map is not None:
-        return _unit_map
-    return _ensure_units_and_conversions()
-
-
-def _resolve_unit_id(unit_str: str | None) -> int | None:
-    """Resolve a unit string (e.g. 'dl', 'gram', 'kpl') to a unit ID.
-
-    Returns None only when the unit string is empty or unrecognised.
-    """
-    if not unit_str:
-        return None
-    canonical = _UNIT_ALIASES.get(unit_str.lower().strip())
-    if canonical is None:
-        return None
-    umap = _get_unit_map()
-    return umap.get(canonical)
-
-
-def _canonical_abbrev(unit_str: str | None) -> str | None:
-    """Normalise a unit string to its canonical abbreviation."""
-    if not unit_str:
-        return None
-    return _UNIT_ALIASES.get(unit_str.lower().strip())
-
-
-def _derive_density_conversions(
-    from_unit: str, to_unit: str, factor: float,
-) -> list[tuple[str, str, float]]:
-    """Compute all cross-domain weight↔volume pairs from one primary density conversion.
-
-    Given e.g. ``("kg", "l", 1.67)`` → produces pairs like
-    ``("kg", "dl", 16.7)``, ``("g", "l", 0.00167)``, etc.
-    Excludes the primary pair itself.
-    """
-    if from_unit in _WEIGHT_FACTORS and to_unit in _VOLUME_FACTORS:
-        kg_to_l = factor * _WEIGHT_FACTORS[from_unit] / _VOLUME_FACTORS[to_unit]
-    elif from_unit in _VOLUME_FACTORS and to_unit in _WEIGHT_FACTORS:
-        kg_to_l = _VOLUME_FACTORS[from_unit] / (factor * _WEIGHT_FACTORS[to_unit])
-    else:
-        return []
-
-    derived: list[tuple[str, str, float]] = []
-    for w, w_f in _WEIGHT_FACTORS.items():
-        for v, v_f in _VOLUME_FACTORS.items():
-            if w == from_unit and v == to_unit:
-                continue  # skip the primary pair
-            d_factor = round(kg_to_l * v_f / w_f, 6)
-            if d_factor > 0:
-                derived.append((w, v, d_factor))
-    return derived
-
-
-def _ensure_density_conversions(
-    matched_ingredients: list[dict], products_by_id: dict[int, dict],
-    *, skip_product_ids: set[int] | None = None,
-) -> None:
-    """Create cross-domain (weight↔volume) density conversions for products.
-
-    For each ingredient whose recipe unit is in a different domain (weight vs
-    volume) than the product's existing conversions, use Gemini AI to estimate
-    the density and create product-specific conversions.
-
-    Products in *skip_product_ids* (e.g. stubs with no real product info) are
-    skipped — Gemini cannot estimate density for generic names.
-    """
-    umap = _get_unit_map()
-    if not umap:
-        return
-
-    _skip = skip_product_ids or set()
-
-    existing_conversions = _api_get("conversions")
-    id_to_abbrev: dict[int, str] = {v: k for k, v in umap.items()}
-
-    # Build per-product conversion unit sets
-    product_conv_units: dict[int, set[str]] = {}
-    for c in existing_conversions:
-        cpid = c.get("product_id")
-        if cpid is None:
-            continue
-        pid = int(cpid)
-        for field in ("from_unit_id", "to_unit_id"):
-            abbrev = id_to_abbrev.get(int(c[field]))
-            if abbrev:
-                product_conv_units.setdefault(pid, set()).add(abbrev)
-
-    need_density: list[dict] = []
-    seen_pids: set[int] = set()
-
-    for ing in matched_ingredients:
-        pid = ing.get("_product_id")
-        recipe_unit = _canonical_abbrev(ing.get("unit"))
-        if pid is None or recipe_unit is None or recipe_unit == "kpl":
-            continue
-        pid = int(pid)
-        if pid in _skip:
-            continue
-        if pid in seen_pids:
-            continue
-
-        # Determine recipe domain
-        if recipe_unit in _WEIGHT_UNITS:
-            recipe_domain = "weight"
-        elif recipe_unit in _VOLUME_UNITS:
-            recipe_domain = "volume"
-        else:
-            continue
-
-        # Check product's existing conversion domains
-        prod_units = product_conv_units.get(pid, set())
-        has_weight = bool(prod_units & _WEIGHT_UNITS)
-        has_volume = bool(prod_units & _VOLUME_UNITS)
-
-        # Already has cross-domain conversions — skip
-        if has_weight and has_volume:
-            seen_pids.add(pid)
-            continue
-
-        # Recipe needs a domain the product doesn't have
-        if recipe_domain == "weight" and not has_weight and has_volume:
-            pass
-        elif recipe_domain == "volume" and not has_volume and has_weight:
-            pass
-        elif not has_weight and not has_volume:
-            prod = products_by_id.get(pid, {})
-            stock_abbrev = id_to_abbrev.get(prod.get("unit_id"))
-            if stock_abbrev in _WEIGHT_UNITS and recipe_domain == "volume":
-                pass
-            elif stock_abbrev in _VOLUME_UNITS and recipe_domain == "weight":
-                pass
-            else:
-                continue
-        else:
-            continue
-
-        prod = products_by_id.get(pid, {})
-        existing_domain = "weight" if (has_weight or id_to_abbrev.get(prod.get("unit_id")) in _WEIGHT_UNITS) else "volume"
-        need_density.append({
-            "product_id": pid,
-            "name": prod.get("name", ""),
-            "has_domain": existing_domain,
-        })
-        seen_pids.add(pid)
-
-    created = 0
-    if not need_density:
-        log.debug("No products need new density conversions from Gemini.")
-    else:
-        product_list = json.dumps(need_density, ensure_ascii=False)
-
-        prompt = f"""For each Finnish grocery product below, estimate the density conversion
-between weight and volume units. Products already have a size in one domain
-(weight or volume) — provide the conversion to the OTHER domain.
-
-Products:
-{product_list}
-
-Return a JSON array:
-[{{"product_id": <id>, "from_unit": "kg"|"g"|"l"|"dl"|"ml", "to_unit": "kg"|"g"|"l"|"dl"|"ml", "factor": <number>}}]
-
-RULES:
-- For products with weight, provide a volume equivalent (e.g. 1 kg flour → factor: 1.67, from_unit: "kg", to_unit: "l")
-- For products with volume, provide a weight equivalent (e.g. 1 l milk → factor: 1.03, from_unit: "l", to_unit: "kg")
-- Use common grocery densities:
-  - Milk/cream/juice: ~1.03 kg/l
-  - Flour (vehnäjauho): ~0.6 kg/l (1 kg ≈ 1.67 l)
-  - Sugar (sokeri): ~0.85 kg/l
-  - Rice (riisi): ~0.85 kg/l
-  - Oil (öljy): ~0.92 kg/l
-  - Butter (voi): ~0.91 kg/l
-  - Honey (hunaja): ~1.4 kg/l
-  - Salt (suola): ~1.2 kg/l
-- If you cannot reasonably estimate the density, return null for factor
-- Use the SIMPLEST conversion (prefer kg↔l over g↔ml)"""
-
-        result = _call_ai_json(prompt)
-        if not result or not isinstance(result, list):
-            log.warning("Gemini failed to estimate density conversions")
-        else:
-            for item in result:
-                pid = item.get("product_id")
-                factor = item.get("factor")
-                from_unit = item.get("from_unit")
-                to_unit = item.get("to_unit")
-                if pid is None or factor is None or from_unit is None or to_unit is None:
-                    continue
-
-                from_id = umap.get(from_unit)
-                to_id = umap.get(to_unit)
-                if from_id is None or to_id is None:
-                    continue
-
-                try:
-                    _api_post("conversions", {
-                        "from_unit_id": from_id,
-                        "to_unit_id": to_id,
-                        "factor": float(factor),
-                        "product_id": int(pid),
-                    })
-                    log.info(
-                        "Created density conversion for product %d (%s): 1 %s = %s %s",
-                        pid, products_by_id.get(pid, {}).get("name", ""), from_unit, factor, to_unit,
-                    )
-                    created += 1
-                except Exception as exc:
-                    log.warning("Failed to create density conversion for product %d: %s", pid, exc)
-                    continue
-
-                # Create derived cross-domain conversions
-                derived = _derive_density_conversions(from_unit, to_unit, float(factor))
-                for d_from, d_to, d_factor in derived:
-                    d_from_id = umap.get(d_from)
-                    d_to_id = umap.get(d_to)
-                    if d_from_id is None or d_to_id is None:
-                        continue
-                    try:
-                        _api_post("conversions", {
-                            "from_unit_id": d_from_id,
-                            "to_unit_id": d_to_id,
-                            "factor": d_factor,
-                            "product_id": int(pid),
-                        })
-                        created += 1
-                    except Exception:
-                        pass  # likely already exists
-
-    # Propagate density conversions from parent products to children.
-    if seen_pids:
-        all_convs = _api_get("conversions")
-        children_of: dict[int, list[int]] = {}
-        for p in products_by_id.values():
-            ppid = p.get("parent_id")
-            if ppid:
-                children_of.setdefault(int(ppid), []).append(p["id"])
-
-        for pid in seen_pids:
-            child_ids = children_of.get(pid, [])
-            if not child_ids:
-                continue
-            parent_density = [
-                c for c in all_convs
-                if c.get("product_id") is not None
-                and int(c["product_id"]) == pid
-                and id_to_abbrev.get(int(c["from_unit_id"])) in (_WEIGHT_UNITS | _VOLUME_UNITS)
-                and id_to_abbrev.get(int(c["to_unit_id"])) in (_WEIGHT_UNITS | _VOLUME_UNITS)
-            ]
-            if not parent_density:
-                continue
-            for cid in child_ids:
-                child_existing = {
-                    (int(c["from_unit_id"]), int(c["to_unit_id"]))
-                    for c in all_convs
-                    if c.get("product_id") is not None
-                    and int(c["product_id"]) == cid
-                }
-                propagated = 0
-                for pc in parent_density:
-                    pair = (int(pc["from_unit_id"]), int(pc["to_unit_id"]))
-                    if pair in child_existing:
-                        continue
-                    try:
-                        _api_post("conversions", {
-                            "from_unit_id": pair[0],
-                            "to_unit_id": pair[1],
-                            "factor": float(pc["factor"]),
-                            "product_id": cid,
-                        })
-                        created += 1
-                        propagated += 1
-                    except Exception:
-                        pass  # likely already exists
-                if propagated:
-                    child_name = products_by_id.get(cid, {}).get("name", str(cid))
-                    log.info("Propagated %d density conversion(s) to child product %d (%s).",
-                             propagated, cid, child_name)
-
-    if created:
-        log.info("Density conversions: %d conversion(s) created total.", created)
-
-
-# ---------------------------------------------------------------------------
-# Scraper proxy
-# ---------------------------------------------------------------------------
-def _scraper_available() -> bool:
-    """Check if the scraper addon is reachable (via nginx proxy)."""
-    try:
-        r = requests.get(f"http://127.0.0.1:8099/api/scraper/config", timeout=3)
-        return r.ok
-    except Exception:
-        return False
-
-
-def _translate_to_finnish_search(ingredient_name: str) -> str:
-    """Translate an ingredient name to a Finnish grocery search term using Gemini.
-
-    The scraper searches Finnish grocery sites, so we need Finnish terms.
-    """
-    prompt = f"""Translate this ingredient name to a short Finnish grocery search term.
-
-Ingredient: "{ingredient_name}"
-
-Return a JSON object: {{"search_term": "finnish search term"}}
-
-Rules:
-- Return a simple Finnish word suitable for searching a Finnish grocery store website (k-ruoka.fi).
-- Use common Finnish grocery terms, e.g.: "torskfilé" → "turska", "butter" → "voi", "cream" → "kerma", "chicken breast" → "kananrinta", "bread crumbs" → "korppujauho"
-- Keep it short — 1-2 words maximum. Just the product type, no brands or quantities.
-- If already in Finnish, return as-is."""
-
-    result = _call_ai_json(prompt)
-    if result and isinstance(result, dict) and result.get("search_term"):
-        return result["search_term"]
-    return ingredient_name
-
-
-def _batch_translate_to_finnish(names: list[str]) -> dict[str, str]:
-    """Translate multiple ingredient names to Finnish search terms in one Gemini call.
-
-    Returns a mapping of original name → Finnish search term.
-    Falls back to the original name if translation fails.
-    """
-    if not names:
-        return {}
-    if len(names) == 1:
-        return {names[0]: _translate_to_finnish_search(names[0])}
-
-    names_json = json.dumps(
-        [{"index": i, "name": n} for i, n in enumerate(names)],
-        ensure_ascii=False,
-    )
-
-    prompt = f"""Translate these ingredient names to short Finnish grocery search terms.
-
-Ingredients:
-{names_json}
-
-Return a JSON array: [{{"index": 0, "search_term": "finnish term"}}]
-
-Rules:
-- Return a simple Finnish word suitable for searching a Finnish grocery store website (k-ruoka.fi).
-- Use common Finnish grocery terms, e.g.: "torskfilé" → "turska", "butter" → "voi", "cream" → "kerma", "chicken breast" → "kananrinta", "bread crumbs" → "korppujauho"
-- Keep it short — 1-2 words maximum per ingredient. Just the product type, no brands or quantities.
-- If already in Finnish, return as-is."""
-
-    result = _call_ai_json(prompt)
-    mapping: dict[str, str] = {}
-    if result and isinstance(result, list):
-        for item in result:
-            idx = item.get("index")
-            term = item.get("search_term")
-            if idx is not None and term and 0 <= idx < len(names):
-                mapping[names[idx]] = term
-
-    # Fill in any missing translations with original names
-    for n in names:
-        if n not in mapping:
-            mapping[n] = n
-    return mapping
-
-
-def _scraper_discover(product_name: str, search_term: str | None = None) -> dict | None:
-    """Ask the scraper addon to find and create a product by name search.
-
-    If *search_term* is provided it is used directly; otherwise the ingredient
-    name is translated to Finnish via a Gemini call first.
-    """
-    if search_term is None:
-        search_term = _translate_to_finnish_search(product_name)
-    log.debug("Scraper search: '%s' → Finnish search term: '%s'", product_name, search_term)
-
-    try:
-        r = requests.post(
-            "http://127.0.0.1:8099/api/scraper/search",
-            json={"query": search_term, "max_products": 3},
-            timeout=30,
-        )
-        if not r.ok:
-            return None
-        results = r.json()
-        products = results.get("products", [])
-        if not products:
-            return None
-
-        # Add the first matching product
-        r = requests.post(
-            "http://127.0.0.1:8099/api/scraper/add_products",
-            json={"products": [products[0]]},
-            timeout=60,
-        )
-        if not r.ok:
-            return None
-        data = r.json()
-        if data.get("success") and data.get("added", 0) > 0:
-            log.debug("Scraper created product for '%s'", product_name)
-            return data
-        return None
-    except Exception as exc:
-        log.warning("Scraper discover failed for '%s': %s", product_name, exc)
-        return None
-
-
-
-# ---------------------------------------------------------------------------
 # Recipe scraping (Gemini AI)
 # ---------------------------------------------------------------------------
 _FETCH_UA = "Mozilla/5.0 (compatible; RecipeBackend/1.0)"
@@ -1019,68 +479,6 @@ def _parse_jsonld_servings(yield_val: Any) -> int:
     return 4
 
 
-def _translate_ingredients(raw_ingredients: list[str]) -> list[dict]:
-    """Use Gemini to parse and translate a list of ingredient strings to Finnish.
-
-    Input: ["2 dl mjölk", "1 msk smör", "salt"]
-    Output: [{"name": "maito", "amount": 2.0, "unit": "dl", "note": null}, ...]
-    """
-    if not raw_ingredients:
-        return []
-
-    lines = "\n".join(f"- {ing}" for ing in raw_ingredients)
-    prompt = f"""Parse and translate these recipe ingredients to Finnish structured JSON.
-
-Ingredient strings:
-{lines}
-
-Return a JSON array, one object per ingredient:
-[{{"name": "generic Finnish ingredient name", "specific": "specific Finnish variant or null", "amount": <number or null>, "unit": "unit or null", "note": "prep note or null"}}]
-
-RULES:
-- Translate ALL ingredient names to Finnish (smör→voi, mjölk→maito, butter→voi, milk→maito, salt→suola, flour→vehnäjauho, egg→kananmuna, ägg→kananmuna, potato→peruna, lök→sipuli, vitlök→valkosipuli, etc.)
-- "name" is the generic category (e.g. "kananmuna" not "3 kananmunaa", "juusto" not "Parmesan")
-- "specific": Finnish-translated variant name when the source names a non-interchangeable sub-type, else null. Reasoning test: if a cook were to swap this variant for the plain generic and the recipe outcome would change (different texture, flavor, chemistry, fat content), the variant is non-interchangeable — set "specific". Be conservative: when in doubt, set "specific".
-  * Sugars: strösocker/socker/sugar → "sokeri", specific=null. syltsocker → specific="hillosokeri" (contains pectin). vaniljsocker/vaniljsukker → specific="vaniljasokeri". florsocker/florsukker/powdered sugar → specific="tomusokeri". farinsocker/brunt socker/brown sugar → specific="fariinisokeri". rörsocker/cane sugar → specific="ruokosokeri".
-  * Fats: smör/butter → "voi", specific=null. margarin → specific="margariini". osaltat smör/unsalted butter → specific="suolaton voi". olivolja/olive oil → specific="oliiviöljy". rapsolja → specific="rypsiöljy". kokosolja → specific="kookosöljy".
-  * Flours: vetemjöl/wheat flour → "vehnäjauho", specific=null. rågmjöl/rye → specific="ruisjauho". grahamsmjöl → specific="grahamjauho". potatismjöl → specific="perunajauho" (distinct from wheat). majsstärkelse/cornstarch → specific="maissitärkkelys". mandelmjöl → specific="mantelijauho". dinkelmjöl → specific="speltijauho".
-  * Dairy & misc: grädde/cream → "kerma", specific=null. vispgrädde → specific="vispikerma". matlagningsgrädde → specific="ruokakerma". crème fraîche → specific="crème fraîche". gräddfil/sour cream → specific="smetana". flingsalt/flake salt → specific="merisuolahiutaleet". whole peppercorns → specific="kokonainen mustapippuri".
-  * Cheese: plain "cheese"/"juusto" → null. Parmesan/gouda/mozzarella/feta → specific=<finnish name>.
-- Amount: extract the numeric quantity (float), or null if absent
-- PARENTHETICAL ANNOTATIONS: If a string contains a weight/calorie note in parentheses like "(ca 120 g)", "(about 180g)", "(500 kcal)" → IGNORE the parenthetical. Use only the primary amount/unit before it.
-  Example: "2 ägg (ca 120 g)" → amount=2, unit="kpl" NOT amount=120, unit="g"
-- "TO TASTE" ingredients: If the source says "to taste", "salta väl", "maun mukaan", "efter smak", "salt and pepper", "season with..." or similar → amount=null, unit=null
-- Unit rules (CRITICAL — follow exactly):
-  * If the source already has a unit (dl, ml, l, g, kg, tsk, msk, tbsp, tsp, cup, etc.) → translate it to the Finnish abbreviation (dl, ml, l, g, kg, tl, rkl)
-  * If the source has NO unit and the ingredient is a whole countable item → unit = "kpl"
-    Countable items: egg/ägg/kananmuna, onion/lök/sipuli, potato/potatis/peruna, carrot/morot/porkkana, lemon/citron/sitruuna, lime, orange/appelsin/appelsiini, banana/banan/banaani, avocado/avokado, apple/äpple/omena, bell pepper/paprika, tomato/tomat/tomaatti, cucumber/gurka/kurkku, zucchini/kesäkurpitsa, eggplant/aubergine/munakoisio, chicken breast/kananrinta, chicken thigh/kananreisi, steak/pihvi, sausage/makkara, tortilla, bread roll/sämpylä, garlic clove/vitlöksklyfta/valkosipulinkynsi, chili
-  * If the source has NO unit and the ingredient is not a countable item (salt, pepper, oil, etc.) → unit = null
-  * NEVER invent a weight unit (g/kg) when no unit is given in the source string
-- Note: preparation detail like "hienonnettu", "viipaloitu", or null
-- Examples:
-  "2 ägg" → name="kananmuna", amount=2, unit="kpl"
-  "2 ägg (ca 120 g)" → name="kananmuna", amount=2, unit="kpl"
-  "3 eggs" → name="kananmuna", amount=3, unit="kpl"
-  "1 lök" → name="sipuli", amount=1, unit="kpl"
-  "1 chicken breast" → name="kananrinta", amount=1, unit="kpl"
-  "4 potatisar" → name="peruna", amount=4, unit="kpl"
-  "1 zucchini" → name="kesäkurpitsa", amount=1, unit="kpl"
-  "500 g kyckling" → name="kana", amount=500, unit="g"
-  "salt" → name="suola", amount=null, unit=null
-  "salta väl" → name="suola", amount=null, unit=null
-  "peppar efter smak" → name="pippuri", amount=null, unit=null
-  "1 dl strösocker" → name="sokeri", specific=null, amount=1, unit="dl"
-  "1 dl syltsocker" → name="sokeri", specific="hillosokeri", amount=1, unit="dl"
-  "2 tsk vaniljsocker" → name="sokeri", specific="vaniljasokeri", amount=2, unit="tl"
-- Do NOT include any text outside the JSON array"""
-
-    result = _call_ai_json(prompt)
-    if not result or not isinstance(result, list):
-        log.warning("Ingredient translation failed — returning empty list")
-        return []
-    return _fix_countable_units(result)
-
-
 # Known countable ingredient keywords (Finnish) — never use g/kg for these
 _COUNTABLE_KEYWORDS = {
     # Eggs
@@ -1176,7 +574,7 @@ Return a JSON object with exactly these fields:
   "name": "Recipe name (in the original language of the recipe)",
   "servings": <number of servings as integer>,
   "ingredients": [
-    {{"name": "generic Finnish ingredient name", "specific": "specific Finnish variant or null", "amount": <number or null>, "unit": "unit string or null", "note": "any note like 'chopped' or null"}}
+    {{"name": "generic Finnish ingredient name", "specific": "specific Finnish variant or null", "amount": <number or null>, "unit": "unit string or null", "note": "any note like 'chopped' or null", "raw": "the ingredient line exactly as written in the summary", "source_name": "the ingredient name exactly as written in the summary, without amount, unit or note"}}
   ],
   "instructions": ["Step 1 text", "Step 2 text", ...]
 }}
@@ -1223,7 +621,9 @@ SPECIFICITY RULES (CRITICAL — drives stock matching):
   Example: "to taste salt" → {{"name": "suola", "amount": null, "unit": null}}
 
 UNIT RULES (CRITICAL — follow these exactly):
-- If the source already has a unit (dl, ml, l, g, kg, tsk, msk, tbsp, tsp, cup) → translate to Finnish abbreviation (dl, ml, l, g, kg, tl, rkl)
+- If the source already has a unit (dl, ml, cl, l, g, kg, tsk, msk, krm, tbsp, tsp) → translate to Finnish abbreviation (dl, ml, cl, l, g, kg, tl, rkl, mm)
+- Imperial units (cup, oz, lb) → keep them as written; they are converted later
+- Package words are units too → translate to the Finnish abbreviation: paket / förpackning / pack / paketti → "pkt", burk / jar / purkki → "prk", can / tin / tölkki → "tlk", påse / bag / pussi → "pss", ask / box / rasia → "rasia", knippe / bunch / nippu → "nippu", kruka / pot / ruukku → "ruukku". NEVER replace a package word with g or kg.
 - If NO unit and ingredient is a whole countable item → unit = "kpl"
   Countable items include: eggs, onions, potatoes, carrots, lemons, limes, oranges, bananas, avocados, apples, pears, bell peppers, tomatoes, cucumbers, zucchini, eggplants, chicken breasts/thighs/legs, steaks, sausages, tortillas, bread rolls, garlic cloves, chili peppers
 - If NO unit and ingredient is not countable (salt, pepper, oil, butter, flour, sugar, etc.) → unit = null
@@ -1233,6 +633,7 @@ UNIT RULES (CRITICAL — follow these exactly):
   "1 chicken breast" → unit="kpl"  |  "4 potatis" → unit="kpl"
   "1 zucchini" → unit="kpl"  |  "2 tortillas" → unit="kpl"
   "500 g chicken" → unit="g" (weight given — NOT kpl)
+  "1 burk crème fraiche" → unit="prk"  |  "1 paket smördeg" → unit="pkt"  |  "1 påse riven ost" → unit="pss"
   "2 dl cream" → unit="dl" (volume given — NOT kpl)
   "salt" → unit=null  |  "pepper to taste" → unit=null
 
@@ -1280,312 +681,60 @@ def _scrape_recipe(url: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Product matching
+# Ingredient resolution (Storage owns matching, concepts and units)
 # ---------------------------------------------------------------------------
-def _get_all_products() -> list[dict]:
-    """Get all products from Storage."""
-    return _api_get("products")
+def _resolve_ingredients(ingredients: list[dict]) -> list[dict]:
+    """Ask Storage which concept each parsed line is (POST ingredients/resolve).
 
-
-def _get_group_master_products() -> tuple[int | None, list[dict]]:
-    """Return (group_master_id, products in 'Group master' group including inactive).
-
-    Inactive products are included so stubs created by previous scrapes are
-    visible and will be matched instead of being duplicated.
-    Returns (None, []) if the group doesn't exist yet.
+    Storage owns matching, concept creation, aliases and unit parsing, so the
+    importer never creates products or guesses units. Returns one result per
+    line, in order: {product_id, specificity, amount, unit_id, needs_review};
+    product_id is None for a line Storage could not bind.
     """
-    try:
-        groups = _api_get("product-groups")
-        group_master_id = None
-        for g in groups:
-            if g.get("name") == "Group master":
-                group_master_id = g["id"]
-                break
-        if group_master_id is None:
-            return None, []
-        gm_products = _api_get(
-            "products",
-            params={"active_only": "false", "group_id": str(group_master_id)},
-        )
-        return group_master_id, gm_products
-    except Exception as exc:
-        log.warning("Could not fetch Group master products: %s", exc)
-        return None, []
-
-
-def _match_ingredient(
-    name: str,
-    products: list[dict],
-    group_masters: list[dict] | None = None,
-    specific: str | None = None,
-) -> tuple[dict, str] | None:
-    """Find the best matching product for an ingredient.
-
-    Returns ``(product, specificity)`` where ``specificity`` is ``"strict"``
-    when matched against a specific child product (the recipe named a
-    non-substitutable variant) and ``"loose"`` when matched against a generic
-    parent/group-master (any child of the parent is acceptable in stock).
-
-    Matching order:
-      1. If *specific* is given, exact-match against ALL active products
-         (including children, not only group masters) and return as strict.
-      2. Exact-match *name* against group masters (today's path) → loose.
-      3. Fall back to exact-match across all products with the legacy
-         climb-to-parent behavior → loose.
-    """
-    candidates = group_masters if group_masters is not None else products
-
-    def _prefer_active(matches: list[dict]) -> dict | None:
-        """Pick the active product when multiple share the same name.
-
-        Inactive products are typically auto-stubs from earlier scrapes;
-        they often have stock=0 and shouldn't preempt a user-curated
-        active product carrying the same name.
-        """
-        if not matches:
-            return None
-        for p in matches:
-            if p.get("active", True):
-                return p
-        return matches[0]
-
-    # Stage 1: specific variant → try to find the exact child product
-    if specific:
-        spec_lower = specific.lower().strip()
-        matches = [p for p in products if p["name"].lower().strip() == spec_lower]
-        best = _prefer_active(matches)
-        if best:
-            # Strict only when we actually landed on a child product (a real
-            # sub-variant). When `specific` happens to equal a parent's name
-            # (e.g. AI emits specific="punasipuli" and "Punasipuli" is a
-            # parent product with children like "Punasipuli 500g Suomi 2lk"),
-            # demote to loose so child stock aggregates. Otherwise the user's
-            # only stocked variant gets ignored under a strict binding.
-            if best.get("parent_id") is not None:
-                return best, "strict"
-            return best, "loose"
-
-    # Stage 2: generic name → match against group-master/category products
-    name_lower = name.lower().strip()
-    matches = [p for p in candidates if p["name"].lower().strip() == name_lower]
-    best = _prefer_active(matches)
-    if best:
-        # Legacy: climb to parent when called without group_masters
-        if best.get("parent_id"):
-            parent = next(
-                (pp for pp in products if pp["id"] == int(best["parent_id"])),
-                None,
-            )
-            if parent:
-                return parent, "loose"
-        return best, "loose"
-
-    return None
-
-
-def _ai_match_ingredients(
-    ingredients: list[dict],
-    products: list[dict],
-    group_masters: list[dict] | None = None,
-) -> list[dict]:
-    """Use AI to match ingredients to Storage products when simple matching fails.
-
-    Candidate pool covers group-master parents AND their direct children, so
-    the LLM can choose a specific variant ("Parmesan") when the recipe asked
-    for one and fall back to the generic parent ("Juusto") otherwise. The
-    returned specificity is written to ``_specificity`` on the ingredient.
-    """
-    unmatched = [i for i in ingredients if i.get("_product_id") is None]
-    if not unmatched:
-        return ingredients
-
-    # Build matchable pool: group masters + their direct children. When called
-    # without group_masters, fall back to all parent-less products + children.
-    if group_masters is not None:
-        master_ids = {p["id"] for p in group_masters}
-        matchable = list(group_masters) + [
-            p for p in products if p.get("parent_id") and int(p["parent_id"]) in master_ids
-        ]
-    else:
-        parents = [p for p in products if not p.get("parent_id")]
-        matchable = parents + [p for p in products if p.get("parent_id")]
-        if not matchable:
-            matchable = products
-
-    if not matchable:
-        return ingredients
-
-    product_names = [
-        {"id": p["id"], "name": p["name"], "parent_id": p.get("parent_id")}
-        for p in matchable
+    if not ingredients:
+        return []
+    items = [
+        {
+            "raw": ing.get("raw"),
+            "name": ing.get("name"),
+            "specific": ing.get("specific"),
+            "amount": ing.get("amount"),
+            "unit_text": ing.get("unit"),
+            "source_name": ing.get("source_name"),
+        }
+        for ing in ingredients
     ]
-
-    ingredient_list = json.dumps(
-        [
-            {"index": i, "name": ing["name"], "specific": ing.get("specific")}
-            for i, ing in enumerate(unmatched)
-        ],
-        ensure_ascii=False,
-    )
-    product_list = json.dumps(product_names[:500], ensure_ascii=False)
-
-    prompt = f"""Match these recipe ingredients to the closest product.
-
-IMPORTANT CONTEXT:
-- This household speaks Swedish, Finnish, and English.
-- Recipes may be in ANY of these languages.
-- ALL product names are in Finnish.
-- Ingredient names below have been translated to Finnish, but may still have slight variations.
-
-Ingredients to match (each has a generic "name" and an optional "specific" variant):
-{ingredient_list}
-
-Available products. parent_id != null means it is a child variant under that parent. parent_id == null means it is a general category:
-{product_list}
-
-Return a JSON array of objects:
-[{{"index": 0, "product_id": <matched product ID or null>, "specificity": "strict"|"loose", "confidence": "high"|"medium"|"low"}}]
-
-MATCHING RULES:
-- If the ingredient has a non-null "specific" field and a CHILD product semantically represents that specific variant → return that child's id with specificity="strict".
-  Example: ingredient {{"name": "juusto", "specific": "parmesan"}} + child "Parmesan" → strict match on Parmesan.
-- Otherwise, match to the GENERAL CATEGORY parent (parent_id == null) with specificity="loose".
-  Example: ingredient {{"name": "juusto", "specific": null}} → match parent "Juusto", loose.
-- If a specific variant child does NOT exist but a generic parent does → match the parent and return specificity="loose" (better a loose match than nothing; the household can still buy the right variant).
-- Match by ingredient TYPE and MEANING, not by brand name or substring. "voi" (butter) should match "Voi", NOT "Voileipäkeksi".
-- Only match with "high" or "medium" confidence — set product_id to null for poor or uncertain matches.
-- Do NOT match based on a word appearing inside a brand name or product description."""
-
-    result = _call_ai_json(prompt)
-    if not result or not isinstance(result, list):
-        return ingredients
-
-    for match in result:
-        idx = match.get("index")
-        pid = match.get("product_id")
-        conf = match.get("confidence", "low")
-        spec = match.get("specificity", "loose")
-        if spec not in ("strict", "loose"):
-            spec = "loose"
-        if idx is not None and pid is not None and conf in ("high", "medium"):
-            if 0 <= idx < len(unmatched):
-                unmatched[idx]["_product_id"] = pid
-                unmatched[idx]["_match_confidence"] = conf
-                unmatched[idx]["_specificity"] = spec
-
-    return ingredients
+    resolved = _api_post("ingredients/resolve", {"items": items}, timeout=300).get("items", [])
+    if len(resolved) != len(ingredients):
+        raise ValueError("Storage resolved a different number of ingredients")
+    return resolved
 
 
-def _deduplicate_stub_candidates(
-    unmatched: list[dict],
-    all_products: list[dict],
-    group_masters: list[dict] | None = None,
-) -> list[dict]:
-    """Match unmatched ingredients to existing products via normalized/fuzzy matching.
+def _ingredient_row(ing: dict, res: dict, idx: int) -> dict:
+    """Storage recipe-ingredient payload for one resolved line."""
+    note_parts = [part for part in (ing.get("note"), ing.get("name")) if part]
+    specificity = res.get("specificity")
+    return {
+        "product_id": int(res["product_id"]),
+        "amount": float(res.get("amount") or 0),
+        "unit_id": int(res["unit_id"]),
+        "note": " — ".join(note_parts),
+        "sort_order": idx,
+        "specificity": specificity if specificity in ("strict", "loose") else "loose",
+        "raw_text": ing.get("raw") or None,
+        "needs_review": bool(res.get("needs_review")),
+    }
 
-    Runs a broader matching pass than _match_ingredient (which only does exact name match
-    on Group masters).  This catches substring containment and case variations across ALL
-    products, then uses AI as a final check for semantic duplicates.
 
-    Returns *unmatched* with ``_product_id`` set where a match is found.
-    """
-    if not unmatched or not all_products:
-        return unmatched
-
-    product_lookup: list[tuple[str, dict]] = [
-        (p["name"].lower().strip(), p) for p in all_products
-    ]
-
-    still_need_ai: list[dict] = []
-
-    for ing in unmatched:
-        if ing.get("_product_id") is not None:
+def _ingredient_rows(ingredients: list[dict], resolved: list[dict]) -> list[dict]:
+    rows = []
+    for idx, (ing, res) in enumerate(zip(ingredients, resolved)):
+        if not res.get("product_id"):
+            log.warning("Skipping an ingredient Storage could not bind: %r",
+                        ing.get("raw") or ing.get("name"))
             continue
-        ing_name = ing["name"].lower().strip()
-
-        matched: dict | None = None
-
-        # 1. Exact normalized match against ALL products
-        for pname, prod in product_lookup:
-            if pname == ing_name:
-                matched = prod
-                break
-
-        # 2. Substring containment (min 3 chars, word-boundary only to avoid false
-        #    positives like "voi" matching inside "virvoitusjuoma")
-        if not matched:
-            for pname, prod in product_lookup:
-                if len(ing_name) < 3:
-                    continue
-                pattern = r"(?<!\w)" + re.escape(ing_name) + r"(?!\w)"
-                pname_pattern = r"(?<!\w)" + re.escape(pname) + r"(?!\w)"
-                if re.search(pattern, pname) or re.search(pname_pattern, ing_name):
-                    if not prod.get("parent_id"):
-                        matched = prod
-                        break
-
-        # Climb to parent if a child was matched
-        if matched and matched.get("parent_id"):
-            parent = next(
-                (p for p in all_products if p["id"] == int(matched["parent_id"])),
-                None,
-            )
-            if parent:
-                matched = parent
-
-        if matched:
-            ing["_product_id"] = matched["id"]
-            log.info(
-                "Dedup matched '%s' → '%s' (ID %d)",
-                ing["name"], matched["name"], matched["id"],
-            )
-        else:
-            still_need_ai.append(ing)
-
-    # 3. AI semantic dedup for remaining candidates
-    if still_need_ai and group_masters:
-        parent_names = [{"id": p["id"], "name": p["name"]} for p in group_masters]
-        if parent_names:
-            candidate_list = json.dumps(
-                [{"index": i, "name": ing["name"]} for i, ing in enumerate(still_need_ai)],
-                ensure_ascii=False,
-            )
-            parent_list = json.dumps(parent_names[:500], ensure_ascii=False)
-
-            prompt = f"""Check if any of these candidate ingredient names are duplicates of existing products.
-
-Candidate ingredients (about to be created as new products):
-{candidate_list}
-
-Existing parent products in the system:
-{parent_list}
-
-For each candidate, check if an existing product already represents the SAME ingredient.
-Consider: singular/plural forms, spelling variations, abbreviations, and synonyms.
-
-Return a JSON array:
-[{{"index": 0, "product_id": <matched existing product ID or null>, "reason": "brief explanation"}}]
-
-RULES:
-- Only match when confident they represent the SAME ingredient
-- "sitruuna" and "Sitruuna" → MATCH (case)
-- "valkosipulinkynsi" and "Valkosipuli" → MATCH (clove of garlic IS garlic)
-- "kanafilee" and "Kana" → MATCH (chicken fillet IS chicken)
-- Do NOT match unrelated items even if names partially overlap"""
-
-            result = _call_ai_json(prompt)
-            if result and isinstance(result, list):
-                for match in result:
-                    idx = match.get("index")
-                    pid = match.get("product_id")
-                    if idx is not None and pid is not None and 0 <= idx < len(still_need_ai):
-                        still_need_ai[idx]["_product_id"] = int(pid)
-                        log.info(
-                            "AI dedup matched '%s' → product ID %d (%s)",
-                            still_need_ai[idx]["name"], pid, match.get("reason", ""),
-                        )
-
-    return unmatched
+        rows.append(_ingredient_row(ing, res, idx))
+    return rows
 
 
 _INSTRUCTION_NUMBERING_RE = re.compile(r"^\s*\d+[.)\-]\s+")
@@ -1605,105 +754,6 @@ def _strip_instruction_numbering(instructions: list) -> list[str]:
         else:
             out.append(s)
     return out
-
-
-def _create_child_stubs_for_unmatched_specifics(
-    ingredients: list[dict],
-    products: list[dict],
-) -> set[int]:
-    """Create stub child products for ingredients that matched a parent loosely
-    but named a non-interchangeable specific variant.
-
-    Closes the gap between the strict/loose matcher and the auto-stub pipeline:
-    an ingredient whose `specific` does not resolve to a child product falls
-    back to the parent with `_specificity="loose"`. The fully-unmatched stub
-    pass at the bottom of `scrape_recipe` does not see it (it has a parent
-    binding), so the variant is silently dropped. This function fills that gap.
-
-    Mutates each affected ingredient: `_product_id` becomes the new (or existing)
-    child id and `_specificity` is promoted to "strict". Returns the set of
-    newly created product IDs.
-    """
-    if not ingredients:
-        return set()
-
-    by_id: dict[int, dict] = {p["id"]: p for p in products}
-    children_by_parent: dict[int, dict[str, dict]] = {}
-    for p in products:
-        pid = p.get("parent_id")
-        if pid is not None:
-            children_by_parent.setdefault(int(pid), {})[p["name"].lower().strip()] = p
-
-    created: set[int] = set()
-
-    for ing in ingredients:
-        if ing.get("_specificity") != "loose":
-            continue
-        parent_id_raw = ing.get("_product_id")
-        if parent_id_raw is None:
-            continue
-        specific = ing.get("specific")
-        if not specific:
-            continue
-
-        parent_id = int(parent_id_raw)
-        parent = by_id.get(parent_id)
-        if not parent:
-            continue
-
-        # With a recursive product tree, the variant stub belongs directly
-        # under the matched node — whatever its depth — not climbed up to a
-        # grandparent. (e.g. Sokeri is itself a child of Makeutusaineet; a
-        # "hillosokeri" variant stub still lands under Sokeri.)
-
-        spec_key = specific.lower().strip()
-        existing_child = children_by_parent.get(parent_id, {}).get(spec_key)
-        if existing_child:
-            ing["_product_id"] = int(existing_child["id"])
-            ing["_specificity"] = "strict"
-            continue
-
-        stub_body: dict = {
-            "name": specific,
-            "parent_id": parent_id,
-            "description": f"Auto-created child of {parent['name']} for recipe variant",
-            "unit_id": parent.get("unit_id"),
-            "location_id": parent.get("location_id"),
-            "default_best_before_days": 0,
-            "active": False,
-            "min_stock_amount": 0,
-            "kind": "concept",
-        }
-        if parent.get("product_group_id") is not None:
-            stub_body["product_group_id"] = parent["product_group_id"]
-        try:
-            resp = _api_post("products", stub_body)
-        except Exception as exc:
-            log.warning(
-                "Failed to create child stub '%s' under '%s': %s",
-                specific, parent["name"], exc,
-            )
-            continue
-
-        new_id = resp.get("id") if isinstance(resp, dict) else None
-        if not new_id:
-            continue
-
-        new_id = int(new_id)
-        ing["_product_id"] = new_id
-        ing["_specificity"] = "strict"
-        created.add(new_id)
-        children_by_parent.setdefault(parent_id, {})[spec_key] = {
-            "id": new_id,
-            "name": specific,
-            "parent_id": parent_id,
-        }
-        log.info(
-            "Created child stub '%s' (id=%s) under parent '%s' for recipe variant",
-            specific, new_id, parent["name"],
-        )
-
-    return created
 
 
 # ---------------------------------------------------------------------------
@@ -1748,47 +798,10 @@ def _upload_recipe_image(recipe_id: int, image_url: str, old_filename: str | Non
         return None
 
 
-def _create_recipe(recipe_data: dict, matched_ingredients: list[dict]) -> dict:
-    """Create a recipe in Storage with all its ingredients.
-
-    Uses a single POST with ingredients array.
-    Returns the created recipe with IDs.
-    """
-    # Build ingredients list
-    ingredients = []
-    all_products = {p["id"]: p for p in _api_get("products")}
-
-    for idx, ing in enumerate(matched_ingredients):
-        pid = ing.get("_product_id")
-        if not pid:
-            continue
-        pid = int(pid)
-        prod = all_products.get(pid, {})
-
-        # Resolve recipe unit to a unit ID
-        recipe_unit_id = _resolve_unit_id(ing.get("unit"))
-        if recipe_unit_id is None:
-            # No unit specified (e.g. "to taste" items) — use product's default
-            recipe_unit_id = prod.get("unit_id") or 1
-
-        note_parts = []
-        if ing.get("note"):
-            note_parts.append(ing["note"])
-        if ing.get("name"):
-            note_parts.append(ing["name"])
-
-        specificity = ing.get("_specificity")
-        if specificity not in ("strict", "loose"):
-            specificity = "loose"
-
-        ingredients.append({
-            "product_id": pid,
-            "amount": float(ing.get("amount") or 0),
-            "unit_id": recipe_unit_id,
-            "note": " — ".join(note_parts) if note_parts else "",
-            "sort_order": idx,
-            "specificity": specificity,
-        })
+def _create_recipe(recipe_data: dict, resolved: list[dict]) -> dict:
+    """Create a recipe in Storage with all its resolved ingredients (one POST).
+    Returns the created recipe's id and name."""
+    ingredients = _ingredient_rows(recipe_data.get("ingredients", []), resolved)
 
     # Build description with source URL
     description = "\n".join(recipe_data.get("instructions", []))
@@ -1925,221 +938,28 @@ def _delete_recipe(recipe_id: int) -> None:
 # Full scrape pipeline
 # ---------------------------------------------------------------------------
 def _handle_scrape(url: str) -> dict:
-    """Full pipeline: scrape URL → match products → discover missing → save to Storage."""
+    """Full pipeline: scrape the page, let Storage resolve every ingredient
+    line into a concept, then save the recipe."""
     log.info("Scraping recipe from: %s", url)
-
-    # 0. Ensure standard units and conversions exist
-    _ensure_units_and_conversions()
-
-    # 1. Scrape the recipe
     recipe_data = _scrape_recipe(url)
     log.debug(
         "Extracted recipe: '%s' with %d ingredients",
         recipe_data.get("name"),
         len(recipe_data.get("ingredients", [])),
     )
+    resolved = _resolve_ingredients(recipe_data.get("ingredients", []))
+    result = _create_recipe(recipe_data, resolved)
+    _reconcile_after_import()
+    return result
 
-    # 2. Get all active products and Group master products (including inactive stubs).
-    # Group master products are used for matching so recipes always link to
-    # category-level products; fetching inactive products prevents duplicate stubs.
-    products = _get_all_products()
-    group_master_id, group_master_products = _get_group_master_products()
 
-    # 3. Match ingredients to products
-    for ing in recipe_data.get("ingredients", []):
-        match = _match_ingredient(
-            ing["name"], products,
-            group_masters=group_master_products,
-            specific=ing.get("specific"),
-        )
-        if match:
-            prod, spec = match
-            ing["_product_id"] = prod["id"]
-            ing["_specificity"] = spec
-            log.debug(
-                "Matched '%s'%s → '%s' (ID %d, %s)",
-                ing["name"], f" (specific={ing['specific']})" if ing.get("specific") else "",
-                prod["name"], prod["id"], spec,
-            )
-        else:
-            ing["_product_id"] = None
-
-    # 4. AI-assisted matching for unmatched
-    recipe_data["ingredients"] = _ai_match_ingredients(
-        recipe_data.get("ingredients", []), products, group_masters=group_master_products
-    )
-
-    # 5. Discover missing products via scraper (batch-translated, parallel)
-    unmatched = [
-        i for i in recipe_data.get("ingredients", [])
-        if i.get("_product_id") is None
-    ]
-
-    any_discovered = False
-    if unmatched and _scraper_available():
-        # Batch-translate all ingredient names to Finnish in one Gemini call
-        names = [i["name"] for i in unmatched]
-        translations = _batch_translate_to_finnish(names)
-
-        # Discover all ingredients in parallel
-        def _discover_one(ing: dict) -> tuple[dict, dict | None]:
-            search_term = translations.get(ing["name"], ing["name"])
-            return ing, _scraper_discover(ing["name"], search_term=search_term)
-
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            futures = {pool.submit(_discover_one, ing): ing for ing in unmatched}
-            for fut in as_completed(futures):
-                try:
-                    ing, result = fut.result()
-                    if result:
-                        any_discovered = True
-                except Exception as exc:
-                    log.warning("Scraper discover thread failed: %s", exc)
-
-        if any_discovered:
-            # Refresh products and Group master products after discovers complete
-            products = _get_all_products()
-            group_master_id, group_master_products = _get_group_master_products()
-            for ing in unmatched:
-                if ing.get("_product_id") is not None:
-                    continue
-                match = _match_ingredient(
-                    ing["name"], products,
-                    group_masters=group_master_products,
-                    specific=ing.get("specific"),
-                )
-                if match:
-                    prod, spec = match
-                    ing["_product_id"] = prod["id"]
-                    ing["_specificity"] = spec
-                    log.debug(
-                        "Discovered and matched '%s' → '%s' (ID %d, %s)",
-                        ing["name"], prod["name"], prod["id"], spec,
-                    )
-
-            # Re-run AI matching only if discovers succeeded
-            still_unmatched_after_discover = [
-                i for i in recipe_data.get("ingredients", [])
-                if i.get("_product_id") is None
-            ]
-            if still_unmatched_after_discover:
-                recipe_data["ingredients"] = _ai_match_ingredients(
-                    recipe_data.get("ingredients", []), products, group_masters=group_master_products
-                )
-
-    # 5b. Create child stubs for ingredients that matched a parent loosely
-    # but carry a non-null specific variant (e.g. specific="hillosokeri" under
-    # parent "sokeri"). Pass the merged active+group-master universe — the
-    # matcher will have bound to either pool, and inactive Group-master stubs
-    # from earlier scrapes are NOT in `products` (which is active-only).
-    known_products = list({
-        p["id"]: p
-        for p in (products + (group_master_products or []))
-    }.values())
-    child_stub_ids = _create_child_stubs_for_unmatched_specifics(
-        recipe_data.get("ingredients", []), known_products,
-    )
-    if child_stub_ids:
-        products = _get_all_products()
-        group_master_id, group_master_products = _get_group_master_products()
-
-    # 6. Create stub parent products (group masters) for any still-unmatched ingredients
-    stub_product_ids: set[int] = set(child_stub_ids)
-    still_unmatched = [
-        i for i in recipe_data.get("ingredients", [])
-        if i.get("_product_id") is None
-    ]
-
-    # 6a. Deduplication pass — try normalized + AI matching before creating stubs
-    if still_unmatched:
-        _deduplicate_stub_candidates(
-            still_unmatched, products, group_masters=group_master_products,
-        )
-        still_unmatched = [i for i in still_unmatched if i.get("_product_id") is None]
-
-    if still_unmatched:
-        # Look up valid location ID (unit resolved per-ingredient below)
-        default_loc_id = None
-        try:
-            locs = _api_get("locations")
-            if locs:
-                default_loc_id = locs[0]["id"]
-        except Exception:
-            pass
-        umap = _get_unit_map()
-        default_unit_id = umap.get("g") or 1
-
-        if default_loc_id is None:
-            log.warning(
-                "Cannot create stub products — no locations in Storage"
-            )
-        else:
-            # Reuse group_master_id resolved above; create the group only if
-            # it didn't exist yet at the start of this scrape.
-            if group_master_id is None:
-                try:
-                    gm = _api_post("product-groups", {"name": "Group master"})
-                    group_master_id = gm.get("id")
-                except Exception as exc:
-                    log.warning("Could not create 'Group master' group: %s", exc)
-
-            for ing in still_unmatched:
-                stub_name = ing["name"]
-                log.warning(
-                    "No existing product found for '%s' — creating stub parent product",
-                    stub_name,
-                )
-                try:
-                    # Resolve the ingredient's unit for the stub product
-                    ing_unit_id = _resolve_unit_id(ing.get("unit"))
-                    stub_body: dict = {
-                        "name": stub_name,
-                        "description": "Auto-created by recipe scraper",
-                        "location_id": default_loc_id,
-                        "unit_id": ing_unit_id or default_unit_id,
-                        "default_best_before_days": 0,
-                        "active": False,
-                        "min_stock_amount": 0,
-                        "kind": "concept",
-                    }
-                    if group_master_id is not None:
-                        stub_body["product_group_id"] = group_master_id
-                    resp = _api_post("products", stub_body)
-                    new_id = resp.get("id")
-                    if new_id:
-                        ing["_product_id"] = int(new_id)
-                        stub_product_ids.add(int(new_id))
-                        log.debug(
-                            "Created stub parent product '%s' (ID %s, unit_id=%s, group master)",
-                            stub_name, new_id, ing_unit_id or default_unit_id,
-                        )
-                except Exception as exc:
-                    log.warning("Failed to create stub product '%s': %s", stub_name, exc)
-
-    # 7. Create cross-domain density conversions (weight↔volume, skip stubs).
-    # A product's base unit is never rewritten here: Storage reads every
-    # quantity through its quantity engine, so stock keeps its meaning.
-    products = _get_all_products()
-    products_by_id = {p["id"]: p for p in products}
-    try:
-        _ensure_density_conversions(
-            recipe_data["ingredients"], products_by_id,
-            skip_product_ids=stub_product_ids,
-        )
-    except Exception as exc:
-        log.warning("Failed to create density conversions: %s", exc)
-
-    # 8. Create recipe in Storage
-    result = _create_recipe(recipe_data, recipe_data["ingredients"])
-
-    # Order-independence: hand anything this scrape created or left unlinked
-    # to Storage's linker sweep (backfills pack conversions + tree links).
+def _reconcile_after_import() -> None:
+    """Best effort: Storage's reconcile sweep merges twin concepts and links
+    loose products."""
     try:
         _api_post("products/reconcile", timeout=120)
     except Exception as exc:
-        log.warning("Post-scrape reconcile sweep failed: %s", exc)
-
-    return result
+        log.warning("Post-import reconcile sweep failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
