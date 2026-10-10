@@ -1,6 +1,6 @@
 {
   "name": "Recipe",
-  "version": "2.7.0",
+  "version": "2.8.0",
   "slug": "recipes",
   "description": "AI-powered recipe scraper with smart shopping lists",
   "url": "https://github.com/Glitchtit/HA-recipes",

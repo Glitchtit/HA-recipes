@@ -100,7 +100,7 @@ function RecipeCard({ recipe, onClick }) {
 // ---------------------------------------------------------------------------
 // RecipeDetail — full-screen overlay
 // ---------------------------------------------------------------------------
-function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, onToast }) {
+function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, onReimport, reimporting, onToast }) {
   if (!recipe) return null;
 
   const imgUrl = recipeImageUrl(recipe.picture_filename);
@@ -211,6 +211,7 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, 
             {recipe.ingredients?.map((ing) => (
               <li
                 key={ing.id}
+                title={ing.raw_text || undefined}
                 className={`text-sm px-3 py-2 rounded-lg ${
                   ing.status === 'green'
                     ? 'bg-brand-orange text-white'
@@ -220,10 +221,15 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, 
                 }`}
               >
                 <span className="font-medium">{ing.product_name}</span>
-                {ing.amount_needed > 0 && (
+                {ing.amount_needed > 0 ? (
                   <span className="text-xs opacity-70 ml-2">
                     — {ing.amount_needed}{ing.unit_abbrev ? ` ${ing.unit_abbrev}` : ' kpl'}
                   </span>
+                ) : (
+                  <span className="text-xs opacity-70 ml-2">— maun mukaan</span>
+                )}
+                {ing.needs_review && (
+                  <span className="ml-2" title="Yksikköä ei tunnistettu, tarkista määrä">⚠</span>
                 )}
               </li>
             ))}
@@ -265,6 +271,15 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, 
           >
             {printing ? '🖨 Tulostetaan…' : '🖨 Tulosta kuittipaperille'}
           </button>
+          {recipe.source_url && (
+            <button
+              onClick={() => onReimport?.()}
+              disabled={reimporting}
+              className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-gray-700 hover:bg-gray-600 active:bg-gray-800 disabled:opacity-50 disabled:hover:bg-gray-700 transition-colors"
+            >
+              {reimporting ? '↻ Päivitetään…' : '↻ Päivitä ainekset lähteestä'}
+            </button>
+          )}
           <button
             onClick={onDelete}
             className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-red-500 hover:bg-red-600 active:bg-red-700 transition-colors"
@@ -677,6 +692,7 @@ export default function App() {
   const [recipes, setRecipes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [scraping, setScraping] = useState(false);
+  const [reimporting, setReimporting] = useState(false);
   const [url, setUrl] = useState('');
   const [toasts, setToasts] = useState([]);
 
@@ -929,6 +945,27 @@ export default function App() {
       addToast('Reseptin poisto epäonnistui', 'error');
     }
   }, [deleteDialog, addToast, closeDetail, loadRecipes]);
+
+  // ── Re-import ingredients from the source page ───────────────────
+  const handleReimport = useCallback(async () => {
+    if (!recipeDetail || reimporting) return;
+    setReimporting(true);
+    try {
+      const { data } = await axios.post(`${API_BACKEND}/recipe/${recipeDetail.id}/reimport`);
+      if (data.success) {
+        const review = data.needs_review ? `, ${data.needs_review} tarkistettavaa` : '';
+        addToast(`Ainekset päivitetty lähteestä (${data.ingredients} ainesta${review})`, 'success');
+        openRecipe(recipeDetail.id);
+        loadRecipes();
+      } else {
+        addToast(data.error || 'Päivitys lähteestä epäonnistui', 'error');
+      }
+    } catch (err) {
+      addToast(err?.response?.data?.error || 'Päivitys lähteestä epäonnistui', 'error');
+    } finally {
+      setReimporting(false);
+    }
+  }, [recipeDetail, reimporting, addToast, openRecipe, loadRecipes]);
 
   // ── Bundles (Setit) ───────────────────────────────────────────────
   const loadBundles = useCallback(async () => {
@@ -1209,6 +1246,8 @@ export default function App() {
           onAddToShoppingList={handleAddToShoppingList}
           onCook={handleCookClick}
           onDelete={handleDeleteClick}
+          onReimport={handleReimport}
+          reimporting={reimporting}
           onToast={addToast}
         />
       )}

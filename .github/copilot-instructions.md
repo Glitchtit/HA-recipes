@@ -9,13 +9,13 @@
 Two s6-overlay services:
 
 1. **recipes** (nginx on port 8099) — serves the React SPA and proxies API requests.
-2. **recipe-backend** (Python on port 8100) — handles recipe scraping, product matching, and Storage CRUD.
+2. **recipe-backend** (Python on port 8100) — handles recipe scraping (summarize, then extract), hands every ingredient line to Storage for matching, and does Storage CRUD.
 
 Request flow: **HA Ingress → nginx (port 8099) → React SPA / API proxies**.
 
 nginx proxy routes:
 - `/api/storage/*` → Storage API (HA-Storage addon)
-- `/api/scraper/*` → Scraper addon (for product discovery)
+- `/api/scraper/*` → Scraper addon (no longer used by the importer since 2.8.0)
 - `/api/backend/*` → Python backend (localhost:8100)
 - `/api/storage-files/*` → Storage file server (recipe images)
 
@@ -49,7 +49,7 @@ npm run dev        # dev server
 npm run build      # production build to dist/
 ```
 
-There is no test suite, linter, or formatter configured.
+Tests: `cd recipes && python -m pytest tests -q` (backend) or `python -m pytest -q` from the submodule root (backend and the `ha_recipes` integration). No linter or formatter is configured.
 
 ## Key Conventions
 
@@ -59,9 +59,9 @@ There is no test suite, linter, or formatter configured.
 - **API keys server-side**: Storage API key not needed (internal addon communication). Gemini key fetched from Storage.
 - **Relative base path**: Vite is configured with `base: './'` for HA ingress compatibility.
 - **Retry logic**: Backend retries connecting to Storage on startup. Frontend shows loading spinner until backend is ready.
-- **Product matching strategy**: Exact match → substring match (prefer parents) → AI match → scraper discovery.
+- **Ingredient matching lives in Storage** (2.8.0): the importer sends each parsed line (`raw`, `name`, `specific`, `amount`, `unit_text`, `source_name`) to `POST /api/ingredients/resolve` and saves what comes back, with `raw_text` and `needs_review`. It never creates products, guesses units or writes conversions. `POST /api/recipe/<id>/reimport` re-fetches the source page and replaces the ingredients through Storage.
 - **Recipe storage**: Recipes stored in Storage (SQLite). Instructions in the description field.
-- **Multilingual**: Input can be Swedish/Finnish/English. All Storage products are in Finnish. AI translates ingredient names to Finnish for matching.
+- **Multilingual**: Input can be Swedish/Finnish/English. All Storage products are in Finnish. The extract step translates ingredient names to Finnish; Storage remembers each source-language word as an alias of the concept it bound to.
 - **Gemini AI**: Uses `google-genai` library (`from google import genai`). Model configurable via Storage config or addon options.
 
 ## HA Add-on Structure

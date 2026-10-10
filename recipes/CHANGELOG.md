@@ -1,3 +1,11 @@
+## 2.8.0
+
+- Importing a recipe asks Storage which product each ingredient is: known words bind directly, the same ingredient in another language or spelling binds to the product you already have, and only a genuinely new ingredient becomes a new one; no more duplicate stubs or scraper products added for unknown ingredients. Requires HA-storage 0.26.0
+- Package words (paket, burk, påse, purkki…) import as package units instead of grams, and every ingredient keeps its original line (shown when you hover it)
+- An ingredient whose unit could not be read shows ⚠; to-taste ingredients show "maun mukaan"
+- "↻ Päivitä ainekset lähteestä" re-imports a recipe's ingredients from its source page; the recipe, its picture and its instructions stay
+- Removed the old ingredient matcher, stub creation, density estimation and scraper discovery (about 1,200 lines)
+
 ## 2.7.0
 
 - "Lisää ostoslistalle" uses Storage's unit-aware shortfall: rows land on the ingredient itself in recipe units (3,5 dl) and pressing again does not double them; requires HA-storage 0.25.0
