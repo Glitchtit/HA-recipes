@@ -1,3 +1,8 @@
+## 2.9.1
+
+- Fix sheet: the amount must be a number (a decimal comma is fine); until it is, saving is off and a hint says why, instead of failing with an error
+- Fix sheet: "Juuri tämä" also works without picking a variant, meaning exactly this ingredient, and an ingredient bound that way opens as it is, so saving it unchanged no longer turns it into "any variant"
+
 ## 2.9.0
 
 - Recipe cards show ✓ when everything is in stock or "n puuttuu" for the missing ingredients, and cookable recipes come first. Requires HA-storage 0.27.0

@@ -51,14 +51,34 @@ export function searchConcepts(products, query, limit = 8) {
     .slice(0, limit);
 }
 
+// A typed amount as a number ("2,5" -> 2.5; 0 means to taste), or null when
+// it is not one.
+export function parseAmount(text) {
+  const t = String(text ?? '').trim().replace(',', '.');
+  if (!/^\d+(\.\d+)?$/.test(t)) return null;
+  return Number(t);
+}
+
+// Where the fix sheet starts: the ingredient's concept, the variant it is
+// bound to, and whether only that one will do. An "exactly this" binding on
+// a top-level ingredient has no variant but is still exact.
+export function initialBinding(ingredient, products) {
+  const bound = products.find((p) => p.id === ingredient.product_id);
+  const exact = ingredient.specificity === 'strict';
+  if (exact && bound?.parent_id) {
+    return { conceptId: bound.parent_id, variantId: bound.id, exact };
+  }
+  return { conceptId: ingredient.product_id, variantId: null, exact };
+}
+
 // The ingredient update the fix sheet saves: any variant of the concept
-// (loose), or exactly the chosen variant (strict).
-export function fixPayload({ conceptId, variantId, amount, unitId }) {
+// (loose), or exactly the chosen variant or the concept itself (strict).
+export function fixPayload({ conceptId, variantId, exact, amount, unitId }) {
   return {
-    product_id: variantId ?? conceptId,
-    amount: Number(String(amount).replace(',', '.')),
+    product_id: (exact && variantId) || conceptId,
+    amount: parseAmount(amount),
     unit_id: unitId,
-    specificity: variantId ? 'strict' : 'loose',
+    specificity: exact ? 'strict' : 'loose',
     needs_review: false,
   };
 }

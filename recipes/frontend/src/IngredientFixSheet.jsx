@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
-import { fixPayload, genericWord, searchConcepts, shouldTeachAlias } from './recipeHelpers';
+import {
+  fixPayload, genericWord, initialBinding, parseAmount, searchConcepts, shouldTeachAlias,
+} from './recipeHelpers';
 
 // Corrects one recipe ingredient when the import bound it wrong: which
 // ingredient it is, any variant or exactly one, and the amount. When the
@@ -15,6 +17,7 @@ export default function IngredientFixSheet({ apiStorage, recipeId, ingredient, o
   const [conceptId, setConceptId] = useState(null);
   const [startConceptId, setStartConceptId] = useState(null);
   const [variantId, setVariantId] = useState(null);
+  const [exact, setExact] = useState(false);
   const [amount, setAmount] = useState(String(ingredient.amount_needed ?? '').replace('.', ','));
   const [unitId, setUnitId] = useState(ingredient.unit_id ?? null);
   const [teach, setTeach] = useState(false);
@@ -28,13 +31,11 @@ export default function IngredientFixSheet({ apiStorage, recipeId, ingredient, o
         const list = Array.isArray(p.data) ? p.data : [];
         setProducts(list);
         setUnits(Array.isArray(u.data) ? u.data : []);
-        // A strict ingredient is bound to a variant; its ingredient is the parent.
-        const bound = list.find((x) => x.id === ingredient.product_id);
-        const start = ingredient.specificity === 'strict' && bound?.parent_id
-          ? bound.parent_id : ingredient.product_id;
-        setConceptId(start);
-        setStartConceptId(start);
-        if (start !== ingredient.product_id) setVariantId(bound.id);
+        const start = initialBinding(ingredient, list);
+        setConceptId(start.conceptId);
+        setStartConceptId(start.conceptId);
+        setVariantId(start.variantId);
+        setExact(start.exact);
       })
       .catch(() => onToast?.('Tuotteiden lataus epäonnistui', 'error'));
     return () => { cancelled = true; };
@@ -51,12 +52,15 @@ export default function IngredientFixSheet({ apiStorage, recipeId, ingredient, o
   const canTeach = conceptId !== startConceptId && concept?.kind === 'concept'
     && shouldTeachAlias(word, concept.name);
 
+  const parsedAmount = parseAmount(amount);
+  const canSave = Boolean(conceptId) && unitId != null && parsedAmount !== null && !saving;
+
   const save = async () => {
-    if (!conceptId || unitId == null || saving) return;
+    if (!canSave) return;
     setSaving(true);
     try {
       await axios.put(`${apiStorage}/recipes/${recipeId}/ingredients/${ingredient.id}`,
-        fixPayload({ conceptId, variantId, amount, unitId }));
+        fixPayload({ conceptId, variantId, exact, amount, unitId }));
       if (canTeach && teach) {
         try {
           await axios.post(`${apiStorage}/products/${conceptId}/aliases`, { alias: word });
@@ -114,7 +118,7 @@ export default function IngredientFixSheet({ apiStorage, recipeId, ingredient, o
               {hits.map((p) => (
                 <li key={p.id}>
                   <button
-                    onClick={() => { setConceptId(p.id); setVariantId(null); setQuery(''); }}
+                    onClick={() => { setConceptId(p.id); setVariantId(null); setExact(false); setQuery(''); }}
                     className="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-gray-700"
                   >
                     {p.name}
@@ -128,23 +132,20 @@ export default function IngredientFixSheet({ apiStorage, recipeId, ingredient, o
         <div>
           <div className={label}>Kelpaako mikä tahansa?</div>
           <div className="mt-1 flex gap-2">
-            <button onClick={() => setVariantId(null)} className={toggle(variantId == null)}>
+            <button onClick={() => { setExact(false); setVariantId(null); }} className={toggle(!exact)}>
               Mikä tahansa
             </button>
-            <button
-              onClick={() => variants.length && setVariantId(variantId ?? variants[0].id)}
-              disabled={!variants.length}
-              className={`${toggle(variantId != null)} disabled:opacity-40`}
-            >
+            <button onClick={() => setExact(true)} className={toggle(exact)}>
               Juuri tämä
             </button>
           </div>
-          {variantId != null && (
+          {exact && variants.length > 0 && (
             <select
-              value={variantId}
-              onChange={(e) => setVariantId(Number(e.target.value))}
+              value={variantId ?? ''}
+              onChange={(e) => setVariantId(e.target.value ? Number(e.target.value) : null)}
               className={`mt-2 w-full ${field}`}
             >
+              <option value="">{concept ? concept.name : '…'}</option>
               {variants.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
             </select>
           )}
@@ -168,7 +169,11 @@ export default function IngredientFixSheet({ apiStorage, recipeId, ingredient, o
               {units.map((u) => <option key={u.id} value={u.id}>{u.abbreviation} – {u.name}</option>)}
             </select>
           </div>
-          <p className="text-xs text-gray-500 mt-1">0 = maun mukaan</p>
+          {parsedAmount === null ? (
+            <p className="text-xs text-red-300 mt-1">Anna määrä numerona, esim. 2,5</p>
+          ) : (
+            <p className="text-xs text-gray-500 mt-1">0 = maun mukaan</p>
+          )}
         </div>
 
         {canTeach && (
@@ -180,7 +185,7 @@ export default function IngredientFixSheet({ apiStorage, recipeId, ingredient, o
 
         <button
           onClick={save}
-          disabled={!conceptId || unitId == null || saving}
+          disabled={!canSave}
           className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-brand-cobalt hover:bg-brand-cobalt-400 active:bg-brand-cobalt-600 disabled:opacity-50 transition-colors"
         >
           {saving ? 'Tallennetaan…' : 'Tallenna'}
