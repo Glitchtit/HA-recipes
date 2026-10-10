@@ -1,3 +1,9 @@
+## 2.7.0
+
+- "Lisää ostoslistalle" uses Storage's unit-aware shortfall: rows land on the ingredient itself in recipe units (3,5 dl) and pressing again does not double them; requires HA-storage 0.25.0
+- Recipe import no longer changes a product's base unit to the recipe's unit (that silently reinterpreted existing stock)
+- Ingredient stubs are created as concepts
+
 ## 2.6.1
 
 - Integration 0.1.1: no more "Detected blocking call to load_verify_locations" warnings at Home Assistant startup. HTTP clients now reuse Home Assistant's pre-built SSL context instead of loading the certificate bundle inside the event loop
