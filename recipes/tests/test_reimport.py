@@ -49,7 +49,8 @@ def test_reimport_replaces_ingredients_and_servings(storage, monkeypatch):
     assert puts[0][0] == "recipes/5/ingredients"
     assert [r["product_id"] for r in puts[0][1]["ingredients"]] == [11, 12]
     assert puts[1] == ("recipes/5", {"servings": 6.0})
-    assert result == {"recipe_id": 5, "name": "Pulla", "ingredients": 2, "needs_review": 0}
+    assert result == {"recipe_id": 5, "name": "Pulla", "ingredients": 2, "needs_review": 0,
+                      "skipped": ["1 st ???"]}
 
 
 def test_reimport_needs_a_source_url(storage, monkeypatch):
@@ -104,3 +105,28 @@ def test_reimport_route_is_single_flight(monkeypatch):
         assert status == 409 and body["success"] is False
     finally:
         server.shutdown()
+
+
+def test_detail_carries_the_unit_and_what_is_in_stock(monkeypatch):
+    def fake_get(path, **_kwargs):
+        if path == "recipes/9":
+            return {"id": 9, "name": "Kastike", "description": "", "ingredients": [
+                {"id": 1, "product_id": 3, "product_name": "Kerma", "amount": 2, "unit_id": 4,
+                 "unit_abbreviation": "dl", "note": "", "specificity": "loose"}]}
+        return {"ingredients": [{"ingredient_id": 1, "status": "yellow", "available": 1.5,
+                                 "approx": True}]}
+
+    monkeypatch.setattr(backend, "_api_get", fake_get)
+    [row] = backend._get_recipe_detail(9)["ingredients"]
+    assert (row["unit_id"], row["available"], row["approx"]) == (4, 1.5, True)
+
+
+def test_list_carries_ingredient_status_counts(monkeypatch):
+    monkeypatch.setattr(backend, "_api_get", lambda path, **_k: [
+        {"id": 1, "name": "Pulla", "servings": 4, "picture_filename": None,
+         "ingredient_count": 5, "missing_count": 2, "yellow_count": 1},
+        {"id": 2, "name": "Vanha", "servings": 2, "picture_filename": None},
+    ])
+    first, older = backend._list_recipes()
+    assert (first["missing_count"], first["yellow_count"], first["ingredient_count"]) == (2, 1, 5)
+    assert (older["missing_count"], older["yellow_count"]) == (None, None)

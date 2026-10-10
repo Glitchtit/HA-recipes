@@ -52,7 +52,7 @@ def storage(monkeypatch):
 
 def test_import_resolves_lines_in_storage_and_saves_them(storage):
     result = backend._handle_scrape("https://example.com/rabarberpaj")
-    assert result == {"recipe_id": 7, "name": "Rabarberpaj"}
+    assert result == {"recipe_id": 7, "name": "Rabarberpaj", "skipped": ["1 st ???"]}
     paths = [p for p, _ in storage]
     assert paths[:2] == ["ingredients/resolve", "recipes"]
     sent = storage[0][1]["items"]

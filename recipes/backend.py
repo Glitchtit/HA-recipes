@@ -728,15 +728,18 @@ def _ingredient_row(ing: dict, res: dict, idx: int) -> dict:
     }
 
 
-def _ingredient_rows(ingredients: list[dict], resolved: list[dict]) -> list[dict]:
-    rows = []
+def _ingredient_rows(ingredients: list[dict], resolved: list[dict]) -> tuple[list[dict], list[str]]:
+    """Storage payloads for the bound lines, and the source text of the lines
+    Storage could not bind (reported to the user instead of silently dropped)."""
+    rows, skipped = [], []
     for idx, (ing, res) in enumerate(zip(ingredients, resolved)):
         if not res.get("product_id"):
-            log.warning("Skipping an ingredient Storage could not bind: %r",
-                        ing.get("raw") or ing.get("name"))
+            line = ing.get("raw") or ing.get("name") or ""
+            log.warning("Skipping an ingredient Storage could not bind: %r", line)
+            skipped.append(line)
             continue
         rows.append(_ingredient_row(ing, res, idx))
-    return rows
+    return rows, skipped
 
 
 _INSTRUCTION_NUMBERING_RE = re.compile(r"^\s*\d+[.)\-]\s+")
@@ -802,8 +805,8 @@ def _upload_recipe_image(recipe_id: int, image_url: str, old_filename: str | Non
 
 def _create_recipe(recipe_data: dict, resolved: list[dict]) -> dict:
     """Create a recipe in Storage with all its resolved ingredients (one POST).
-    Returns the created recipe's id and name."""
-    ingredients = _ingredient_rows(recipe_data.get("ingredients", []), resolved)
+    Returns the created recipe's id and name, and the lines left out."""
+    ingredients, skipped = _ingredient_rows(recipe_data.get("ingredients", []), resolved)
 
     # Build description with source URL
     description = "\n".join(recipe_data.get("instructions", []))
@@ -833,11 +836,12 @@ def _create_recipe(recipe_data: dict, resolved: list[dict]) -> dict:
             _api_put(f"recipes/{recipe_id}", {"picture_filename": filename})
             log.debug("Uploaded recipe image: %s", filename)
 
-    return {"recipe_id": recipe_id, "name": recipe_data["name"]}
+    return {"recipe_id": recipe_id, "name": recipe_data["name"], "skipped": skipped}
 
 
 def _list_recipes() -> list[dict]:
-    """List all recipes from Storage."""
+    """List all recipes from Storage, with the ingredient status counts the
+    list badges use (None from a Storage older than 0.27.0)."""
     recipes = _api_get("recipes")
     return [
         {
@@ -845,6 +849,9 @@ def _list_recipes() -> list[dict]:
             "name": r["name"],
             "picture_filename": r.get("picture_filename"),
             "servings": r.get("servings", 1),
+            "ingredient_count": r.get("ingredient_count"),
+            "missing_count": r.get("missing_count"),
+            "yellow_count": r.get("yellow_count"),
         }
         for r in recipes
     ]
@@ -874,10 +881,13 @@ def _get_recipe_detail(recipe_id: int) -> dict:
             "parent_id": a.get("parent_id"),
             "parent_name": None,
             "amount_needed": pos.get("amount") or 0,
+            "unit_id": pos.get("unit_id"),
             "unit_abbrev": pos.get("unit_abbreviation", ""),
             "note": pos.get("note", ""),
             "specificity": pos.get("specificity", "loose"),
             "status": a.get("status", "red"),
+            "available": a.get("available"),
+            "approx": bool(a.get("approx")),
             "raw_text": pos.get("raw_text"),
             "needs_review": bool(pos.get("needs_review")),
         })
@@ -968,7 +978,7 @@ def _handle_reimport(recipe_id: int) -> dict:
     log.info("Re-importing recipe %d from %s", recipe_id, url)
     recipe_data = _scrape_recipe(url)
     ingredients = recipe_data.get("ingredients", [])
-    rows = _ingredient_rows(ingredients, _resolve_ingredients(ingredients))
+    rows, skipped = _ingredient_rows(ingredients, _resolve_ingredients(ingredients))
     if not rows:
         raise ValueError("The re-import found no ingredients; the recipe was left unchanged")
     _api_put(f"recipes/{recipe_id}/ingredients", {"ingredients": rows})
@@ -980,6 +990,7 @@ def _handle_reimport(recipe_id: int) -> dict:
         "name": recipe.get("name"),
         "ingredients": len(rows),
         "needs_review": sum(1 for r in rows if r["needs_review"]),
+        "skipped": skipped,
     }
 
 
