@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import os
 import re
 import threading
@@ -537,59 +536,6 @@ def _derive_density_conversions(
     return derived
 
 
-def _update_product_default_units(
-    matched_ingredients: list[dict], products_by_id: dict[int, dict]
-) -> None:
-    """Update product default unit to match recipe unit when no conversion exists.
-
-    For products where the recipe uses a measurable unit (g, dl, etc.) but the
-    product's unit_id is still the generic Piece and no product-specific
-    conversion was created by AI, change the product's default unit to the
-    recipe unit.  E.g. "Turskafile" unit → grams.
-    """
-    umap = _get_unit_map()
-    if not umap:
-        return
-
-    existing_conversions = _api_get("conversions")
-    products_with_conv: set[int] = set()
-    for c in existing_conversions:
-        cpid = c.get("product_id")
-        if cpid is not None:
-            products_with_conv.add(int(cpid))
-
-    updated: set[int] = set()
-    for ing in matched_ingredients:
-        pid = ing.get("_product_id")
-        recipe_unit = _canonical_abbrev(ing.get("unit"))
-        if pid is None or recipe_unit is None or recipe_unit == "kpl":
-            continue
-        pid = int(pid)
-        if pid in updated or pid in products_with_conv:
-            continue
-
-        recipe_unit_id = umap.get(recipe_unit)
-        if recipe_unit_id is None:
-            continue
-
-        prod = products_by_id.get(pid, {})
-        current_unit_id = prod.get("unit_id")
-        if current_unit_id == recipe_unit_id:
-            continue
-
-        try:
-            _api_put(f"products/{pid}", {
-                "unit_id": recipe_unit_id,
-            })
-            updated.add(pid)
-            log.debug(
-                "Updated product %d (%s) default unit to %s",
-                pid, prod.get("name", ""), recipe_unit,
-            )
-        except Exception as exc:
-            log.warning("Failed to update product %d default unit: %s", pid, exc)
-
-
 def _ensure_density_conversions(
     matched_ingredients: list[dict], products_by_id: dict[int, dict],
     *, skip_product_ids: set[int] | None = None,
@@ -816,48 +762,6 @@ RULES:
 
     if created:
         log.info("Density conversions: %d conversion(s) created total.", created)
-
-
-def _convert_recipe_to_stock(
-    recipe_amount: float,
-    recipe_unit_id: int,
-    product_id: int,
-    stock_unit_id: int,
-    conversions: list[dict],
-) -> float | None:
-    """Convert a recipe amount to stock units using conversions.
-
-    Returns the equivalent amount in stock units, or None if no conversion path exists.
-    """
-    if recipe_unit_id == stock_unit_id:
-        return recipe_amount
-
-    # Build a conversion graph for this product + global conversions
-    conv_graph: dict[int, dict[int, float]] = {}
-    for c in conversions:
-        cpid = c.get("product_id")
-        if cpid is not None and int(cpid) != product_id:
-            continue
-        from_id = int(c["from_unit_id"])
-        to_id = int(c["to_unit_id"])
-        factor = float(c["factor"])
-        conv_graph.setdefault(from_id, {})[to_id] = factor
-        if factor != 0:
-            conv_graph.setdefault(to_id, {})[from_id] = 1.0 / factor
-
-    # BFS to find conversion path from recipe_unit_id to stock_unit_id
-    visited = {recipe_unit_id}
-    queue = [(recipe_unit_id, recipe_amount)]
-    while queue:
-        current_unit, current_amount = queue.pop(0)
-        if current_unit == stock_unit_id:
-            return current_amount
-        for next_unit, factor in conv_graph.get(current_unit, {}).items():
-            if next_unit not in visited:
-                visited.add(next_unit)
-                queue.append((next_unit, current_amount * factor))
-
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1768,6 +1672,7 @@ def _create_child_stubs_for_unmatched_specifics(
             "default_best_before_days": 0,
             "active": False,
             "min_stock_amount": 0,
+            "kind": "concept",
         }
         if parent.get("product_group_id") is not None:
             stub_body["product_group_id"] = parent["product_group_id"]
@@ -1983,79 +1888,16 @@ def _get_recipe_detail(recipe_id: int) -> dict:
 
 
 def _add_to_shopping_list(recipe_id: int, mode: str) -> dict:
-    """Add recipe ingredients to shopping list.
+    """Add recipe ingredients to the shopping list.
 
     mode: "missing" | "all" | "missing_and_opened"
 
-    Uses unit conversions to calculate purchase amounts in pieces.
+    Storage owns the stock and unit math (POST recipes/{id}/to-shopping): it
+    adds each shortfall on the ingredient's own product in recipe units and
+    merges repeated needs, so this is a thin delegate.
     """
-    detail = _get_recipe_detail(recipe_id)
-    added = 0
-
-    # Load conversions and products for smart amounts
-    all_conversions = _api_get("conversions")
-    products_list = _api_get("products")
-    products_by_id = {p["id"]: p for p in products_list}
-
-    # Get recipe ingredients for unit_id lookup
-    recipe_data = _api_get(f"recipes/{recipe_id}")
-    recipe_ingredients = recipe_data.get("ingredients", [])
-    ing_by_id = {i["id"]: i for i in recipe_ingredients}
-
-    for ing in detail["ingredients"]:
-        should_add = False
-        if mode == "all":
-            should_add = True
-        elif mode == "missing":
-            should_add = ing["status"] == "red"
-        elif mode == "missing_and_opened":
-            should_add = ing["status"] in ("red", "yellow")
-
-        if not should_add:
-            continue
-
-        # Strict ingredients: buy the exact linked product (parmesan when the
-        # recipe says parmesan). Loose ingredients: prefer the parent so the
-        # shopper picks whichever sub-variant is on sale.
-        if ing.get("specificity") == "strict":
-            pid = ing.get("product_id")
-        else:
-            pid = ing.get("parent_id") or ing.get("product_id")
-        if not pid:
-            continue
-        pid = int(pid)
-
-        # Calculate how many pieces to buy using conversions
-        purchase_amount = 1
-        pos = ing_by_id.get(ing.get("id"))
-        if pos:
-            recipe_unit_id = pos.get("unit_id")
-            recipe_amount = pos.get("amount", 1)
-            prod = products_by_id.get(pid, {})
-            stock_unit_id = prod.get("unit_id")
-
-            if recipe_unit_id and stock_unit_id and recipe_unit_id != stock_unit_id:
-                amount_in_pieces = _convert_recipe_to_stock(
-                    recipe_amount, recipe_unit_id, pid, stock_unit_id, all_conversions
-                )
-                if amount_in_pieces is not None and amount_in_pieces > 0:
-                    purchase_amount = math.ceil(amount_in_pieces)
-            elif recipe_unit_id == stock_unit_id:
-                purchase_amount = math.ceil(recipe_amount)
-
-        try:
-            _api_post("shopping-list", {
-                "product_id": pid,
-                "amount": purchase_amount,
-                "unit_id": ing.get("unit_id") or products_by_id.get(pid, {}).get("unit_id"),
-                "note": ing.get("product_name", ""),
-                "recipe_id": recipe_id,
-            })
-            added += 1
-        except Exception as exc:
-            log.warning("Failed to add product %d to shopping list: %s", pid, exc)
-
-    return {"added": added, "mode": mode}
+    result = _api_post(f"recipes/{recipe_id}/to-shopping", {"mode": mode})
+    return {"added": int(result.get("added", 0)), "mode": mode}
 
 
 def _delete_recipe(recipe_id: int) -> None:
@@ -2258,6 +2100,7 @@ def _handle_scrape(url: str) -> dict:
                         "default_best_before_days": 0,
                         "active": False,
                         "min_stock_amount": 0,
+                        "kind": "concept",
                     }
                     if group_master_id is not None:
                         stub_body["product_group_id"] = group_master_id
@@ -2273,18 +2116,9 @@ def _handle_scrape(url: str) -> dict:
                 except Exception as exc:
                     log.warning("Failed to create stub product '%s': %s", stub_name, exc)
 
-    # 7b. Update product default units for products without conversions
-    # (pack-size conversions themselves are created by Storage at product
-    # creation time — see Storage Task 4 — not here at scrape time)
-    products = _get_all_products()
-    products_by_id = {p["id"]: p for p in products}
-    try:
-        _update_product_default_units(recipe_data["ingredients"], products_by_id)
-    except Exception as exc:
-        log.warning("Failed to update product default units: %s", exc)
-
-    # 7c. Create cross-domain density conversions (weight↔volume, skip stubs)
-    # Refresh products_by_id to include any default-unit changes from 7b
+    # 7. Create cross-domain density conversions (weight↔volume, skip stubs).
+    # A product's base unit is never rewritten here: Storage reads every
+    # quantity through its quantity engine, so stock keeps its meaning.
     products = _get_all_products()
     products_by_id = {p["id"]: p for p in products}
     try:

@@ -343,6 +343,7 @@ class TestCreateChildStubsForUnmatchedSpecifics:
         assert body["name"] == "hillosokeri"
         assert body["parent_id"] == 10
         assert body["active"] is False
+        assert body["kind"] == "concept"
         # Parent's product_group_id propagates so the child lands under the same group
         assert body.get("product_group_id") == 7
         # Ingredient re-bound to the new child as strict
@@ -555,3 +556,23 @@ class TestRecipeDetailDelegatesAvailability:
         monkeypatch.setattr(backend, "_api_get", fake_api_get)
         detail = backend._get_recipe_detail(99)
         assert detail["ingredients"][0]["status"] == "red"
+
+
+class TestShoppingDelegatesToStorage:
+    """Storage owns the stock and unit math for "add to shopping list"."""
+
+    def test_posts_mode_to_storage(self, monkeypatch):
+        calls = []
+
+        def fake_api_post(path, data=None, **_kwargs):
+            calls.append((path, data))
+            return {"added": 3, "created": 2, "merged": 1}
+
+        monkeypatch.setattr(backend, "_api_post", fake_api_post)
+        result = backend._add_to_shopping_list(7, "missing_and_opened")
+        assert calls == [("recipes/7/to-shopping", {"mode": "missing_and_opened"})]
+        assert result == {"added": 3, "mode": "missing_and_opened"}
+
+    def test_base_unit_rewrite_is_gone(self):
+        # Rewriting a product's unit from a recipe reinterpreted its stock.
+        assert not hasattr(backend, "_update_product_default_units")
