@@ -876,6 +876,8 @@ def _get_recipe_detail(recipe_id: int) -> dict:
             "note": pos.get("note", ""),
             "specificity": pos.get("specificity", "loose"),
             "status": a.get("status", "red"),
+            "raw_text": pos.get("raw_text"),
+            "needs_review": bool(pos.get("needs_review")),
         })
 
     description = recipe.get("description", "")
@@ -951,6 +953,32 @@ def _handle_scrape(url: str) -> dict:
     result = _create_recipe(recipe_data, resolved)
     _reconcile_after_import()
     return result
+
+
+def _handle_reimport(recipe_id: int) -> dict:
+    """Fetch a recipe's source page again and replace its ingredients and
+    servings through Storage. The recipe id, name, picture and instructions
+    stay; Storage keeps the replaced ingredient rows in a backup table."""
+    recipe = _api_get(f"recipes/{recipe_id}")
+    url = (recipe.get("source_url") or "").strip()
+    if not url:
+        raise ValueError("This recipe has no source address to re-import from")
+    log.info("Re-importing recipe %d from %s", recipe_id, url)
+    recipe_data = _scrape_recipe(url)
+    ingredients = recipe_data.get("ingredients", [])
+    rows = _ingredient_rows(ingredients, _resolve_ingredients(ingredients))
+    if not rows:
+        raise ValueError("The re-import found no ingredients; the recipe was left unchanged")
+    _api_put(f"recipes/{recipe_id}/ingredients", {"ingredients": rows})
+    if recipe_data.get("servings"):
+        _api_put(f"recipes/{recipe_id}", {"servings": float(recipe_data["servings"])})
+    _reconcile_after_import()
+    return {
+        "recipe_id": recipe_id,
+        "name": recipe.get("name"),
+        "ingredients": len(rows),
+        "needs_review": sum(1 for r in rows if r["needs_review"]),
+    }
 
 
 def _reconcile_after_import() -> None:
@@ -1050,6 +1078,29 @@ class _Handler(BaseHTTPRequestHandler):
                     return self._json({"success": False, "error": str(exc)}, 500)
                 except BrokenPipeError:
                     pass
+            finally:
+                _op_lock.release()
+
+        # Re-import: /api/recipe/<id>/reimport (same single-flight lock as scrape)
+        m = re.match(r"/api/recipe/(\d+)/reimport$", path)
+        if m:
+            if not _op_lock.acquire(blocking=False):
+                return self._json(
+                    {"success": False, "error": "Another operation is in progress"},
+                    409,
+                )
+            try:
+                result = _handle_reimport(int(m.group(1)))
+                return self._json({"success": True, **result})
+            except BrokenPipeError:
+                log.info("Client disconnected before re-import response was sent")
+                return None
+            except Exception as exc:
+                log.exception("Re-import failed")
+                try:
+                    return self._json({"success": False, "error": str(exc)}, 500)
+                except BrokenPipeError:
+                    return None
             finally:
                 _op_lock.release()
 
