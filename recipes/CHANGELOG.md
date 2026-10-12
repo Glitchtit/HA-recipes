@@ -1,3 +1,7 @@
+## 2.9.2
+
+- After cooking a recipe, its ingredient colours and the recipe cards' "puuttuu" counts update right away instead of showing the stock from before cooking
+
 ## 2.9.1
 
 - Fix sheet: the amount must be a number (a decimal comma is fine); until it is, saving is off and a hint says why, instead of failing with an error

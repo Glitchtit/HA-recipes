@@ -959,6 +959,10 @@ export default function App() {
           unmatched ? 'error' : 'success',
         );
         setCookDialog(null);
+        // Stock changed: the open recipe's colours and the cards' "puuttuu"
+        // counts are out of date.
+        refreshRecipe(cookDialog.id);
+        loadRecipes();
       } catch (err) {
         const detail = err?.response?.data?.detail ?? err.message;
         addToast(`Reseptin teko epäonnistui: ${detail}`, 'error');
@@ -966,7 +970,7 @@ export default function App() {
         setCookBusy(false);
       }
     },
-    [cookDialog, addToast],
+    [cookDialog, addToast, refreshRecipe, loadRecipes],
   );
 
   // ── Delete recipe ─────────────────────────────────────────────────
