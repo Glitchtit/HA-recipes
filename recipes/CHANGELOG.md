@@ -1,3 +1,7 @@
+## 2.9.4
+
+- Importing a recipe no longer creates a combined "Suola ja pippuri" ingredient: a to-taste line naming several seasonings ("suolaa ja pippuria", "salt, peppar och timjan") becomes one ingredient per seasoning, all showing the original line
+
 ## 2.9.3
 
 - On a narrow phone the recipe link box no longer pushes the "Hae" button off the screen while a recipe is being fetched

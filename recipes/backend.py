@@ -617,6 +617,9 @@ SPECIFICITY RULES (CRITICAL — drives stock matching):
   "2 dl vispgrädde" → {{"name": "kerma", "specific": "vispikerma"}}
   "1 msk margarin" → {{"name": "voi", "specific": "margariini"}}
 
+"ONE INGREDIENT PER ITEM" RULE:
+- A line naming several things at once ("to taste suolaa ja pippuria", "salt and pepper", "salt, peppar och timjan") → a separate ingredient object for each thing, every one with the same "raw" line. Never one ingredient named "suola ja pippuri".
+
 "TO TASTE" RULE:
 - If a line in the summary starts with "to taste" (e.g. "to taste salt", "to taste pepper")
   → set amount=null and unit=null for that ingredient
@@ -646,7 +649,7 @@ UNIT RULES (CRITICAL — follow these exactly):
         raise ValueError("Failed to extract recipe JSON from summary")
 
     if "ingredients" in result and isinstance(result["ingredients"], list):
-        result["ingredients"] = _fix_countable_units(result["ingredients"])
+        result["ingredients"] = _split_combined(_fix_countable_units(result["ingredients"]))
 
     if "instructions" in result and isinstance(result["instructions"], list):
         result["instructions"] = _strip_instruction_numbering(result["instructions"])
@@ -654,6 +657,28 @@ UNIT RULES (CRITICAL — follow these exactly):
     result["source_url"] = url
     result["image_url"] = image_url
     return result
+
+
+_COMBINED_RE = re.compile(r"\s*(?:,|&|\+|\bja\b|\boch\b|\band\b)\s*", re.IGNORECASE)
+
+
+def _split_combined(ingredients: list) -> list:
+    """One line per seasoning: a to-taste line the AI still returned as one
+    ingredient ("suola ja pippuri") becomes one ingredient per item, each with
+    the line's raw text and note. A measured line stays whole: its amount
+    cannot be shared out, and "juusto ja kinkku" may be one product."""
+    out: list = []
+    for ing in ingredients:
+        name = ing.get("name") if isinstance(ing, dict) else None
+        parts = [p for p in _COMBINED_RE.split(name or "") if p.strip()]
+        if len(parts) < 2 or ing.get("amount"):
+            out.append(ing)
+            continue
+        sources = [p for p in _COMBINED_RE.split(ing.get("source_name") or "") if p.strip()]
+        for i, part in enumerate(parts):
+            out.append({**ing, "name": part.strip(), "specific": None,
+                        "source_name": sources[i].strip() if len(sources) == len(parts) else None})
+    return out
 
 
 def _scrape_recipe(url: str) -> dict:

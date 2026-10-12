@@ -132,3 +132,61 @@ def test_extract_prompt_treats_milk_fat_levels_as_plain_milk(monkeypatch):
     backend._extract_recipe_from_summary("dummy", "https://example.com", None)
     rule = next(line for line in captured["prompt"].splitlines() if "standardmjölk" in line)
     assert "täysmaito" in rule and "kevytmaito" in rule and "null" in rule
+
+
+def _extract_with(monkeypatch, ingredients):
+    monkeypatch.setattr(backend, "_call_ai_json", lambda prompt: {
+        "name": "x", "servings": 4, "ingredients": ingredients, "instructions": []})
+    return backend._extract_recipe_from_summary("dummy", "https://example.com", None)["ingredients"]
+
+
+def test_a_to_taste_salt_and_pepper_line_becomes_two_lines(monkeypatch):
+    """Live finding (re-import of Helppo juustopiirakka): "suolaa ja pippuria
+    myllystä" came back as one ingredient and Storage made a "Suola ja
+    pippuri" item of it. Each seasoning is its own line, same source text."""
+    out = _extract_with(monkeypatch, [
+        {"name": "suola ja pippuri", "specific": None, "amount": None, "unit": None,
+         "note": "myllystä", "raw": "to taste suolaa ja pippuria myllystä",
+         "source_name": "suolaa ja pippuria"},
+    ])
+    assert [(i["name"], i["source_name"], i["amount"], i["note"], i["raw"]) for i in out] == [
+        ("suola", "suolaa", None, "myllystä", "to taste suolaa ja pippuria myllystä"),
+        ("pippuri", "pippuria", None, "myllystä", "to taste suolaa ja pippuria myllystä"),
+    ]
+
+
+def test_a_list_of_seasonings_splits_on_commas_and_conjunctions(monkeypatch):
+    out = _extract_with(monkeypatch, [
+        {"name": "suola, pippuri ja timjami", "specific": None, "amount": 0, "unit": None,
+         "note": None, "raw": "to taste salt, peppar och timjan", "source_name": "salt, peppar och timjan"},
+        {"name": "salt & pepper", "specific": None, "amount": None, "unit": None,
+         "note": None, "raw": "salt & pepper", "source_name": None},
+    ])
+    assert [i["name"] for i in out] == ["suola", "pippuri", "timjami", "salt", "pepper"]
+    assert [i["source_name"] for i in out[:3]] == ["salt", "peppar", "timjan"]
+
+
+def test_a_measured_line_is_never_split(monkeypatch):
+    # An amount cannot be shared out between two things, and "juusto ja
+    # kinkku" may be one product.
+    lines = [
+        {"name": "kerma ja maito", "specific": None, "amount": 2, "unit": "dl", "note": None,
+         "raw": "2 dl kermaa ja maitoa", "source_name": "kermaa ja maitoa"},
+        {"name": "pizza", "specific": "juusto ja kinkku -pizza", "amount": 1, "unit": "kpl", "note": None,
+         "raw": "1 juusto ja kinkku -pizza", "source_name": None},
+    ]
+    out = _extract_with(monkeypatch, [dict(l) for l in lines])
+    assert [i["name"] for i in out] == ["kerma ja maito", "pizza"]
+
+
+def test_extract_prompt_asks_for_one_ingredient_per_seasoning(monkeypatch):
+    captured = {}
+
+    def fake_call(prompt):
+        captured["prompt"] = prompt
+        return {"name": "x", "servings": 1, "ingredients": [], "instructions": []}
+
+    monkeypatch.setattr(backend, "_call_ai_json", fake_call)
+    backend._extract_recipe_from_summary("dummy", "https://example.com", None)
+    rule = next(line for line in captured["prompt"].splitlines() if "suolaa ja pippuria" in line)
+    assert "separate" in rule.lower()
