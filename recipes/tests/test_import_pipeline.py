@@ -190,3 +190,47 @@ def test_extract_prompt_asks_for_one_ingredient_per_seasoning(monkeypatch):
     backend._extract_recipe_from_summary("dummy", "https://example.com", None)
     rule = next(line for line in captured["prompt"].splitlines() if "suolaa ja pippuria" in line)
     assert "separate" in rule.lower()
+
+
+def _page(yield_value):
+    import json as _json
+    ld = {"@context": "https://schema.org", "@type": "Recipe", "name": "Piirakka", "recipeYield": yield_value}
+    return f'<html><head><script type="application/ld+json">{_json.dumps(ld)}</script></head><body>annosta</body></html>'
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("8, 8 annosta", 8), (["4", "4 portioner"], 4), (6, 6), ("Serves 2-3", 2), ("", None), (None, None),
+])
+def test_servings_come_from_the_pages_recipe_data(value, expected):
+    """Live finding (Helppo juustopiirakka): the page shows "8" only in a
+    portion input, so the AI saw "annosta" and answered 1. schema.org
+    recipeYield has the number."""
+    assert backend._jsonld_servings(_page(value)) == expected
+
+
+class _Soup:  # conftest stubs bs4; the scrape only needs the page text
+    def __init__(self, html, _parser):
+        self.html = html
+
+    def get_text(self, separator="", strip=False):
+        return self.html
+
+
+def test_page_servings_win_over_the_ai_guess(monkeypatch):
+    monkeypatch.setattr(backend, "_fetch_html", lambda url: _page("8, 8 annosta"))
+    monkeypatch.setattr(backend, "_extract_image_url", lambda url, html=None: None)
+    monkeypatch.setattr(backend, "BeautifulSoup", _Soup)
+    monkeypatch.setattr(backend, "_summarize_recipe", lambda text, url: "summary")
+    monkeypatch.setattr(backend, "_call_ai_json", lambda prompt: {
+        "name": "Piirakka", "servings": 1, "ingredients": [], "instructions": []})
+    assert backend._scrape_recipe("https://example.com/p")["servings"] == 8
+
+
+def test_without_recipe_data_the_ai_servings_stay(monkeypatch):
+    monkeypatch.setattr(backend, "_fetch_html", lambda url: "<html><body>4 annosta</body></html>")
+    monkeypatch.setattr(backend, "_extract_image_url", lambda url, html=None: None)
+    monkeypatch.setattr(backend, "BeautifulSoup", _Soup)
+    monkeypatch.setattr(backend, "_summarize_recipe", lambda text, url: "summary")
+    monkeypatch.setattr(backend, "_call_ai_json", lambda prompt: {
+        "name": "Piirakka", "servings": 4, "ingredients": [], "instructions": []})
+    assert backend._scrape_recipe("https://example.com/p")["servings"] == 4

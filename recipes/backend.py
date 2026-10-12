@@ -444,39 +444,39 @@ def _extract_image_url(url: str, html: str | None = None) -> str | None:
         return None
 
 
+_LDJSON_RE = re.compile(r"<script[^>]*application/ld\+json[^>]*>(.*?)</script>", re.S | re.I)
+
+
 def _find_jsonld_recipe(html: str) -> dict | None:
-    """Find and return a schema.org Recipe object from JSON-LD script tags."""
-    soup = BeautifulSoup(html, "html.parser")
-    for script in soup.find_all("script", type="application/ld+json"):
+    """The page's schema.org Recipe object from its JSON-LD blocks, if any."""
+    for block in _LDJSON_RE.findall(html or ""):
         try:
-            data = json.loads(script.string or "")
-        except Exception:
+            data = json.loads(block.strip())
+        except ValueError:
             continue
-        candidates = data if isinstance(data, list) else [data]
-        for item in candidates:
-            if not isinstance(item, dict):
-                continue
-            # Handle @graph wrapper
-            if "@graph" in item:
-                for node in item["@graph"]:
-                    if isinstance(node, dict) and node.get("@type") == "Recipe":
-                        return node
-            if item.get("@type") == "Recipe":
-                return item
+        nodes = data if isinstance(data, list) else [data]
+        nodes = [n for item in nodes if isinstance(item, dict)
+                 for n in ([item] + [g for g in item.get("@graph", []) if isinstance(g, dict)])]
+        for node in nodes:
+            kind = node.get("@type")
+            if kind == "Recipe" or (isinstance(kind, list) and "Recipe" in kind):
+                return node
     return None
 
 
-def _parse_jsonld_servings(yield_val: Any) -> int:
-    """Parse recipeYield into an integer serving count."""
-    if isinstance(yield_val, (int, float)):
-        return int(yield_val)
-    if isinstance(yield_val, list) and yield_val:
-        yield_val = yield_val[0]
-    if isinstance(yield_val, str):
-        m = re.search(r"\d+", yield_val)
-        if m:
-            return int(m.group())
-    return 4
+def _jsonld_servings(html: str) -> int | None:
+    """Servings from the page's recipeYield ("8, 8 annosta", ["4", "4
+    portioner"], 6); None when the page has no recipe data or no number.
+    Pages often show the count only inside a portion input, which the text
+    the AI reads does not contain."""
+    recipe = _find_jsonld_recipe(html)
+    value = recipe.get("recipeYield") if recipe else None
+    if isinstance(value, list):
+        value = value[0] if value else None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return int(value) or None
+    match = re.search(r"\d+", value) if isinstance(value, str) else None
+    return int(match.group()) or None if match else None
 
 
 # Known countable ingredient keywords (Finnish) — never use g/kg for these
@@ -703,7 +703,11 @@ def _scrape_recipe(url: str) -> dict:
     if not summary:
         raise ValueError("Failed to summarize recipe page")
 
-    return _extract_recipe_from_summary(summary, url, image_url)
+    recipe = _extract_recipe_from_summary(summary, url, image_url)
+    servings = _jsonld_servings(raw_html)
+    if servings:
+        recipe["servings"] = servings
+    return recipe
 
 
 

@@ -1,3 +1,7 @@
+## 2.9.5
+
+- An imported recipe takes its servings from the page's recipe data when it has them ("8 annosta" was read as 1 when the page showed the number only in its portion selector)
+
 ## 2.9.4
 
 - Importing a recipe no longer creates a combined "Suola ja pippuri" ingredient: a to-taste line naming several seasonings ("suolaa ja pippuria", "salt, peppar och timjan") becomes one ingredient per seasoning, all showing the original line
