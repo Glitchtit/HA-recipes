@@ -1,3 +1,7 @@
+## 2.9.3
+
+- On a narrow phone the recipe link box no longer pushes the "Hae" button off the screen while a recipe is being fetched
+
 ## 2.9.2
 
 - After cooking a recipe, its ingredient colours and the recipe cards' "puuttuu" counts update right away instead of showing the stock from before cooking
