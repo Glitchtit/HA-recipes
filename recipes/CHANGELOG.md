@@ -1,3 +1,8 @@
+## 2.9.6
+
+- New icon and logo in the add-on store, part of one matching set across all GlitchyRee apps
+- Integration 0.2.1: its own icon and logo on the Integrations page (Home Assistant 2026.3 or newer)
+
 ## 2.9.5
 
 - An imported recipe takes its servings from the page's recipe data when it has them ("8 annosta" was read as 1 when the page showed the number only in its portion selector)
