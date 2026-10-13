@@ -1,3 +1,7 @@
+## 2.9.7
+
+- Integration 0.2.2: the repository has a README, so HACS shows what Recipes does and how to set it up
+
 ## 2.9.6
 
 - New icon and logo in the add-on store, part of one matching set across all GlitchyRee apps
