@@ -21,19 +21,19 @@
 
 - **Import from any recipe page** — paste a URL and the AI reads the page, extracts the ingredients and steps, and translates ingredient names to Finnish. Lines it could not read are listed instead of dropped. Cloudflare-protected pages (k-ruoka.fi) work through an optional FlareSolverr
 - **Ingredients matched to your products** — every ingredient line is bound to a Finnish product in [HA-storage](https://github.com/Glitchtit/HA-storage), so a recipe knows what is in stock. Tap an ingredient to fix a wrong match, amount or unit
-- **See what you can cook** — recipe cards show ✓ when everything is in stock or "N puuttuu" for the missing ingredients, cookable recipes first. Ingredient rows are coloured by stock status
-- **Cook and shop** — cooking a recipe takes the ingredients out of stock for the servings you choose; "Lisää ostoslistalle" adds the missing ingredients (or all of them) to the shopping list
-- **Setit** — named sets of products (e.g. "Taco night") stored in Storage, pushed onto the shopping list from a checklist; items already in stock or on the list start unchecked
+- **See what you can cook** — recipe cards show ✓ when everything is in stock or "N missing" for the missing ingredients, cookable recipes first. Ingredient rows are coloured by stock status
+- **Cook and shop** — cooking a recipe takes the ingredients out of stock for the servings you choose; "Add to shopping list" adds the missing ingredients (or all of them) to the shopping list
+- **Sets** — named sets of products (e.g. "Taco night") stored in Storage, pushed onto the shopping list from a checklist; items already in stock or on the list start unchecked
 - **Receipt printing** — print a recipe on a thermal receipt printer with [HA-print](https://github.com/Glitchtit/HA-print)
 - **Choice of AI** — Gemini (default), Claude, or a local Ollama model
 
 ## 📸 Screenshots
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Glitchtit/HA-recipes/main/docs/screenshots/phones.png" alt="Recipe detail and Setit on a phone" width="100%">
+  <img src="https://raw.githubusercontent.com/Glitchtit/HA-recipes/main/docs/screenshots/phones.png" alt="Recipe detail and Sets on a phone" width="100%">
 </p>
 
-<p align="center"><sub>A recipe's ingredients and steps, and the Setit shopping bundles</sub></p>
+<p align="center"><sub>A recipe's ingredients and steps, and the Sets shopping bundles</sub></p>
 
 ## 🚀 Installation
 
@@ -87,7 +87,7 @@ All three return a response, so use them with `response_variable` in scripts.
   <a href="https://github.com/Glitchtit/HA-print"><img src="https://raw.githubusercontent.com/Glitchtit/HA-print/main/print/icon.png" width="56" alt="Print"></a>
 </p>
 
-<p align="center"><sub>Recipes keeps its recipes, products, stock and Setit in Storage and adds what is missing to Storage's shopping list; Print turns a recipe into a receipt.</sub></p>
+<p align="center"><sub>Recipes keeps its recipes, products, stock and sets in Storage and adds what is missing to Storage's shopping list; Print turns a recipe into a receipt.</sub></p>
 
 ## 🛠️ Development
 

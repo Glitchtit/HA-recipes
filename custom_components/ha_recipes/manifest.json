@@ -1,7 +1,7 @@
 {
   "domain": "ha_recipes",
   "name": "Recipes",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "documentation": "https://github.com/Glitchtit/HA-recipes",
   "issue_tracker": "https://github.com/Glitchtit/HA-recipes/issues",
   "codeowners": ["@Glitchtit"],
