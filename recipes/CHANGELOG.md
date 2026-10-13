@@ -1,3 +1,7 @@
+## 2.9.8
+
+- The whole interface is in English: Recipes and Sets tabs, Import, servings, Ingredients, Steps, "N missing", the cook, shopping-list and ingredient-fix dialogs, and all messages. Recipe, ingredient and product names stay in Finnish, and recipes in Finnish or Swedish still import as before
+
 ## 2.9.7
 
 - Integration 0.2.2: the repository has a README, so HACS shows what Recipes does and how to set it up

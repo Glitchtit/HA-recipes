@@ -16,7 +16,12 @@ export function recipeBadge(recipe) {
   const missing = recipe?.missing_count;
   if (missing == null || !recipe.ingredient_count) return null;
   if (missing === 0) return { tone: 'ok', text: '✓' };
-  return { tone: 'missing', text: `${missing} puuttuu` };
+  return { tone: 'missing', text: `${missing} missing` };
+}
+
+// "4 servings", "1 serving".
+export function servingsText(n) {
+  return `${n} serving${n !== 1 ? 's' : ''}`;
 }
 
 // Cookable recipes first, then the fewest missing ingredients, then by name.
@@ -26,11 +31,11 @@ export function sortRecipes(recipes) {
   return [...recipes].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, 'fi'));
 }
 
-// "on 1 dl" for an ingredient that is only partly in stock.
+// "1 dl in stock" for an ingredient that is only partly in stock.
 export function haveText(ing) {
   if (ing.status !== 'yellow' || !(ing.amount_needed > 0)) return '';
   if (typeof ing.available !== 'number' || ing.available <= 0) return '';
-  return `on ${ing.approx ? '≈' : ''}${formatQty(ing.available, ing.unit_abbrev || 'kpl')}`;
+  return `${ing.approx ? '≈' : ''}${formatQty(ing.available, ing.unit_abbrev || 'kpl')} in stock`;
 }
 
 // The word an import bound an ingredient by: the last part of its note
@@ -94,8 +99,8 @@ export function skippedText(skipped) {
   const n = skipped.length;
   const shown = skipped.slice(0, 3).map((s) => `"${s}"`).join(', ');
   const rest = n - 3;
-  const more = rest > 0 ? ` ja ${rest} ${rest === 1 ? 'muu' : 'muuta'}` : '';
+  const more = rest > 0 ? ` and ${rest} more` : '';
   return n === 1
-    ? `Ohitettiin 1 rivi, jota ei tunnistettu: ${shown}`
-    : `Ohitettiin ${n} riviä, joita ei tunnistettu: ${shown}${more}`;
+    ? `Skipped 1 line that was not recognized: ${shown}`
+    : `Skipped ${n} lines that were not recognized: ${shown}${more}`;
 }

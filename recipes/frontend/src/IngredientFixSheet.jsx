@@ -37,7 +37,7 @@ export default function IngredientFixSheet({ apiStorage, recipeId, ingredient, o
         setVariantId(start.variantId);
         setExact(start.exact);
       })
-      .catch(() => onToast?.('Tuotteiden lataus epäonnistui', 'error'));
+      .catch(() => onToast?.('Could not load products', 'error'));
     return () => { cancelled = true; };
   }, [apiStorage, ingredient, onToast]);
 
@@ -65,13 +65,13 @@ export default function IngredientFixSheet({ apiStorage, recipeId, ingredient, o
         try {
           await axios.post(`${apiStorage}/products/${conceptId}/aliases`, { alias: word });
         } catch (err) {
-          onToast?.(`Sanaa "${word}" ei voitu muistaa: ${err?.response?.data?.detail || 'virhe'}`, 'error');
+          onToast?.(`Could not remember "${word}": ${err?.response?.data?.detail || 'error'}`, 'error');
         }
       }
-      onToast?.('Ainesosa korjattu', 'success');
+      onToast?.('Ingredient fixed', 'success');
       onSaved?.();
     } catch (err) {
-      onToast?.(`Tallennus epäonnistui: ${err?.response?.data?.detail || err?.message || 'virhe'}`, 'error');
+      onToast?.(`Save failed: ${err?.response?.data?.detail || err?.message || 'error'}`, 'error');
     } finally {
       setSaving(false);
     }
@@ -94,23 +94,23 @@ export default function IngredientFixSheet({ apiStorage, recipeId, ingredient, o
       >
         <div className="flex items-start justify-between gap-2">
           <div>
-            <h3 className="text-lg font-bold text-gray-100">Korjaa ainesosa</h3>
+            <h3 className="text-lg font-bold text-gray-100">Fix ingredient</h3>
             {ingredient.raw_text && (
-              <p className="text-xs text-gray-400 mt-1">Reseptissä: {ingredient.raw_text}</p>
+              <p className="text-xs text-gray-400 mt-1">In recipe: {ingredient.raw_text}</p>
             )}
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-200 text-2xl leading-none px-2" aria-label="Sulje">
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-200 text-2xl leading-none px-2" aria-label="Close">
             ✕
           </button>
         </div>
 
         <div>
-          <div className={label}>Ainesosa</div>
+          <div className={label}>Ingredient</div>
           <div className="mt-1 text-sm font-medium text-gray-100">{concept ? concept.name : '…'}</div>
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Hae toinen ainesosa…"
+            placeholder="Search for another ingredient…"
             className={`mt-2 w-full ${field}`}
           />
           {hits.length > 0 && (
@@ -130,13 +130,13 @@ export default function IngredientFixSheet({ apiStorage, recipeId, ingredient, o
         </div>
 
         <div>
-          <div className={label}>Kelpaako mikä tahansa?</div>
+          <div className={label}>Will any kind do?</div>
           <div className="mt-1 flex gap-2">
             <button onClick={() => { setExact(false); setVariantId(null); }} className={toggle(!exact)}>
-              Mikä tahansa
+              Any kind
             </button>
             <button onClick={() => setExact(true)} className={toggle(exact)}>
-              Juuri tämä
+              Exactly this
             </button>
           </div>
           {exact && variants.length > 0 && (
@@ -152,7 +152,7 @@ export default function IngredientFixSheet({ apiStorage, recipeId, ingredient, o
         </div>
 
         <div>
-          <div className={label}>Määrä</div>
+          <div className={label}>Amount</div>
           <div className="mt-1 flex gap-2">
             <input
               inputMode="decimal"
@@ -165,21 +165,21 @@ export default function IngredientFixSheet({ apiStorage, recipeId, ingredient, o
               onChange={(e) => setUnitId(Number(e.target.value))}
               className={`flex-1 ${field}`}
             >
-              {unitId == null && <option value="">Valitse yksikkö</option>}
+              {unitId == null && <option value="">Choose a unit</option>}
               {units.map((u) => <option key={u.id} value={u.id}>{u.abbreviation} – {u.name}</option>)}
             </select>
           </div>
           {parsedAmount === null ? (
-            <p className="text-xs text-red-300 mt-1">Anna määrä numerona, esim. 2,5</p>
+            <p className="text-xs text-red-300 mt-1">Enter the amount as a number, e.g. 2,5</p>
           ) : (
-            <p className="text-xs text-gray-500 mt-1">0 = maun mukaan</p>
+            <p className="text-xs text-gray-500 mt-1">0 = to taste</p>
           )}
         </div>
 
         {canTeach && (
           <label className="flex items-center gap-2 text-sm text-gray-300">
             <input type="checkbox" checked={teach} onChange={(e) => setTeach(e.target.checked)} />
-            Muista jatkossa: "{word}" on aina {concept.name}
+            Always read "{word}" as {concept.name} from now on
           </label>
         )}
 
@@ -188,7 +188,7 @@ export default function IngredientFixSheet({ apiStorage, recipeId, ingredient, o
           disabled={!canSave}
           className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-brand-cobalt hover:bg-brand-cobalt-400 active:bg-brand-cobalt-600 disabled:opacity-50 transition-colors"
         >
-          {saving ? 'Tallennetaan…' : 'Tallenna'}
+          {saving ? 'Saving…' : 'Save'}
         </button>
       </div>
     </div>

@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   fixPayload, formatQty, genericWord, haveText, initialBinding, parseAmount, recipeBadge,
-  searchConcepts, shouldTeachAlias, skippedText, sortRecipes,
+  searchConcepts, servingsText, shouldTeachAlias, skippedText, sortRecipes,
 } from './recipeHelpers.js';
 
 test('quantities use a decimal comma like Storage', () => {
@@ -14,9 +14,14 @@ test('quantities use a decimal comma like Storage', () => {
 
 test('badges: tick when everything is in stock, count of missing otherwise', () => {
   assert.deepEqual(recipeBadge({ ingredient_count: 4, missing_count: 0 }), { tone: 'ok', text: '✓' });
-  assert.deepEqual(recipeBadge({ ingredient_count: 4, missing_count: 2 }), { tone: 'missing', text: '2 puuttuu' });
+  assert.deepEqual(recipeBadge({ ingredient_count: 4, missing_count: 2 }), { tone: 'missing', text: '2 missing' });
   assert.equal(recipeBadge({ ingredient_count: 0, missing_count: 0 }), null);
   assert.equal(recipeBadge({ ingredient_count: null, missing_count: null }), null);
+});
+
+test('servings read "N servings", singular for one', () => {
+  assert.equal(servingsText(4), '4 servings');
+  assert.equal(servingsText(1), '1 serving');
 });
 
 test('cookable recipes sort first, then fewest missing, then by name', () => {
@@ -31,9 +36,9 @@ test('cookable recipes sort first, then fewest missing, then by name', () => {
 });
 
 test('a partly stocked ingredient says how much there is', () => {
-  assert.equal(haveText({ status: 'yellow', amount_needed: 3, available: 1, unit_abbrev: 'dl' }), 'on 1 dl');
+  assert.equal(haveText({ status: 'yellow', amount_needed: 3, available: 1, unit_abbrev: 'dl' }), '1 dl in stock');
   assert.equal(haveText({ status: 'yellow', amount_needed: 300, available: 120.5, approx: true, unit_abbrev: 'g' }),
-    'on ≈120,5 g');
+    '≈120,5 g in stock');
   assert.equal(haveText({ status: 'green', amount_needed: 1, available: 4, unit_abbrev: 'kpl' }), '');
   assert.equal(haveText({ status: 'yellow', amount_needed: 1, available: 0, unit_abbrev: 'kpl' }), '');
 });
@@ -95,7 +100,7 @@ test('an alias is taught only when the word differs from the concept name', () =
 
 test('skipped import lines are named, three at most', () => {
   assert.equal(skippedText([]), '');
-  assert.equal(skippedText(['1 st ???']), 'Ohitettiin 1 rivi, jota ei tunnistettu: "1 st ???"');
+  assert.equal(skippedText(['1 st ???']), 'Skipped 1 line that was not recognized: "1 st ???"');
   assert.equal(skippedText(['a', 'b', 'c', 'd']),
-    'Ohitettiin 4 riviä, joita ei tunnistettu: "a", "b", "c" ja 1 muu');
+    'Skipped 4 lines that were not recognized: "a", "b", "c" and 1 more');
 });

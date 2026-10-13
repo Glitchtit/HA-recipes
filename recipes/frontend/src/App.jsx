@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import WhatsNewModal from './components/WhatsNewModal';
 import IngredientFixSheet from './IngredientFixSheet';
-import { formatQty, haveText, recipeBadge, skippedText, sortRecipes } from './recipeHelpers';
+import { formatQty, haveText, recipeBadge, servingsText, skippedText, sortRecipes } from './recipeHelpers';
 
 // ---------------------------------------------------------------------------
 // Ingress-path awareness
@@ -102,7 +102,7 @@ function RecipeCard({ recipe, onClick }) {
           {recipe.name}
         </h3>
         <p className="text-gray-400 text-xs mt-1">
-          {recipe.servings} annos{recipe.servings !== 1 ? 'ta' : ''}
+          {servingsText(recipe.servings)}
         </p>
       </div>
     </button>
@@ -149,10 +149,10 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, 
         image_b64,
       };
       await axios.post(`${API_PRINT}/print/recipe`, payload);
-      onToast?.('Tulostettu', 'success');
+      onToast?.('Printed', 'success');
     } catch (err) {
-      const msg = err?.response?.data?.detail || err?.message || 'tuntematon virhe';
-      onToast?.(`Tulostus epäonnistui: ${msg}`, 'error');
+      const msg = err?.response?.data?.detail || err?.message || 'unknown error';
+      onToast?.(`Print failed: ${msg}`, 'error');
     } finally {
       setPrinting(false);
     }
@@ -199,7 +199,7 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, 
         <div className="px-6 pb-4">
           <h2 className="text-xl font-bold text-gray-100">{recipe.name}</h2>
           <p className="text-gray-400 mt-1 text-sm">
-            {recipe.servings} annos{recipe.servings !== 1 ? 'ta' : ''}
+            {servingsText(recipe.servings)}
             {recipe.source_url && (
               <>
                 {' · '}
@@ -209,7 +209,7 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, 
                   rel="noopener noreferrer"
                   className="text-emerald-400 hover:underline"
                 >
-                  Lähde
+                  Source
                 </a>
               </>
             )}
@@ -219,7 +219,7 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, 
         {/* Ingredients */}
         <div className="px-6 pb-4">
           <h3 className="text-sm font-bold text-gray-300 uppercase tracking-wide mb-2">
-            Ainekset
+            Ingredients
           </h3>
           <ul className="space-y-1">
             {recipe.ingredients?.map((ing) => (
@@ -227,7 +227,7 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, 
                 <button
                   type="button"
                   onClick={() => setFixing(ing)}
-                  title={ing.raw_text || 'Korjaa ainesosa'}
+                  title={ing.raw_text || 'Fix ingredient'}
                   className={`w-full text-left text-sm px-3 py-2 rounded-lg ${
                     ing.status === 'green'
                       ? 'bg-brand-orange text-white'
@@ -242,13 +242,13 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, 
                       — {formatQty(ing.amount_needed, ing.unit_abbrev || 'kpl')}
                     </span>
                   ) : (
-                    <span className="text-xs opacity-70 ml-2">— maun mukaan</span>
+                    <span className="text-xs opacity-70 ml-2">— to taste</span>
                   )}
                   {haveText(ing) && (
                     <span className="text-xs opacity-70 ml-2">· {haveText(ing)}</span>
                   )}
                   {ing.needs_review && (
-                    <span className="ml-2" title="Yksikköä ei tunnistettu, tarkista määrä">⚠</span>
+                    <span className="ml-2" title="Unit not recognized, check the amount">⚠</span>
                   )}
                 </button>
               </li>
@@ -260,7 +260,7 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, 
         {recipe.instructions?.length > 0 && (
           <div className="px-6 pb-4">
             <h3 className="text-sm font-bold text-gray-300 uppercase tracking-wide mb-2">
-              Ohjeet
+              Steps
             </h3>
             <ol className="list-decimal pl-5 space-y-3 text-gray-300 text-sm">
               {recipe.instructions.map((step, i) => (
@@ -276,20 +276,20 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, 
             onClick={() => onCook?.()}
             className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 transition-colors"
           >
-            🍳 Tee resepti (vähennä varastosta)
+            🍳 Cook (deduct from stock)
           </button>
           <button
             onClick={() => onAddToShoppingList(hasOpened)}
             className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-brand-cobalt hover:bg-brand-cobalt-400 active:bg-brand-cobalt-600 transition-colors"
           >
-            Lisää ostoslistalle
+            Add to shopping list
           </button>
           <button
             onClick={handlePrint}
             disabled={printing}
             className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-gray-700 hover:bg-gray-600 active:bg-gray-800 disabled:opacity-50 disabled:hover:bg-gray-700 transition-colors"
           >
-            {printing ? '🖨 Tulostetaan…' : '🖨 Tulosta kuittipaperille'}
+            {printing ? '🖨 Printing…' : '🖨 Print receipt'}
           </button>
           {recipe.source_url && (
             <button
@@ -297,14 +297,14 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, 
               disabled={reimporting}
               className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-gray-700 hover:bg-gray-600 active:bg-gray-800 disabled:opacity-50 disabled:hover:bg-gray-700 transition-colors"
             >
-              {reimporting ? '↻ Päivitetään…' : '↻ Päivitä ainekset lähteestä'}
+              {reimporting ? '↻ Updating…' : '↻ Update ingredients from source'}
             </button>
           )}
           <button
             onClick={onDelete}
             className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-red-500 hover:bg-red-600 active:bg-red-700 transition-colors"
           >
-            Poista resepti
+            Remove recipe
           </button>
         </div>
       </div>
@@ -337,37 +337,37 @@ function ShoppingListDialog({ hasOpened, onSelect, onClose }) {
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-lg font-bold text-gray-100 text-center mb-2">
-          Lisää ostoslistalle
+          Add to shopping list
         </h3>
         <p className="text-gray-400 text-sm text-center mb-5">
-          Mitkä ainekset lisätään?
+          Which ingredients?
         </p>
         <div className="space-y-2">
           <button
             onClick={() => onSelect('missing')}
             className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-red-500 hover:bg-red-600 active:bg-red-700 transition-colors"
           >
-            Vain puuttuvat
+            Only missing
           </button>
           {hasOpened && (
             <button
               onClick={() => onSelect('missing_and_opened')}
               className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-amber-500 hover:bg-amber-600 active:bg-amber-700 transition-colors"
             >
-              Puuttuvat + avatut
+              Missing + opened
             </button>
           )}
           <button
             onClick={() => onSelect('all')}
             className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-brand-cobalt hover:bg-brand-cobalt-400 active:bg-brand-cobalt-600 transition-colors"
           >
-            Kaikki ainekset
+            All ingredients
           </button>
           <button
             onClick={onClose}
             className="w-full py-2 rounded-xl font-semibold text-gray-400 text-sm hover:text-gray-200 transition-colors"
           >
-            Peruuta
+            Cancel
           </button>
         </div>
       </div>
@@ -393,12 +393,12 @@ function CookDialog({ recipe, onConfirm, onClose, busy }) {
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-lg font-bold text-gray-100 text-center mb-1">
-          Tee resepti
+          Cook
         </h3>
         <p className="text-gray-400 text-sm text-center mb-5">
-          Vähennä aineet varastosta — puuttuvat lisätään ostoslistalle.
+          Deduct the ingredients from stock — missing ones go on the shopping list.
         </p>
-        <label className="block text-sm text-gray-300 mb-1">Annoksia</label>
+        <label className="block text-sm text-gray-300 mb-1">Servings</label>
         <input
           type="number"
           value={servings}
@@ -413,14 +413,14 @@ function CookDialog({ recipe, onConfirm, onClose, busy }) {
             disabled={busy}
             className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:bg-gray-700 transition-colors"
           >
-            {busy ? 'Vähennetään…' : 'Vahvista'}
+            {busy ? 'Deducting…' : 'Confirm'}
           </button>
           <button
             onClick={onClose}
             disabled={busy}
             className="w-full py-2 rounded-xl font-semibold text-gray-400 text-sm hover:text-gray-200 disabled:opacity-50 transition-colors"
           >
-            Peruuta
+            Cancel
           </button>
         </div>
       </div>
@@ -435,8 +435,8 @@ function DeleteConfirmDialog({
   recipeName,
   onConfirm,
   onClose,
-  title = 'Poista resepti?',
-  question = 'Haluatko varmasti poistaa reseptin',
+  title = 'Remove recipe?',
+  question = 'Remove the recipe',
 }) {
   return (
     <div
@@ -459,13 +459,13 @@ function DeleteConfirmDialog({
             onClick={onConfirm}
             className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-red-500 hover:bg-red-600 active:bg-red-700 transition-colors"
           >
-            Poista
+            Remove
           </button>
           <button
             onClick={onClose}
             className="w-full py-2 rounded-xl font-semibold text-gray-400 text-sm hover:text-gray-200 transition-colors"
           >
-            Peruuta
+            Cancel
           </button>
         </div>
       </div>
@@ -474,7 +474,7 @@ function DeleteConfirmDialog({
 }
 
 // ---------------------------------------------------------------------------
-// BundleCard — grid item for the Setit tab
+// BundleCard — grid item for the Sets tab
 // ---------------------------------------------------------------------------
 function BundleCard({ bundle, onClick, onEdit }) {
   return (
@@ -486,14 +486,14 @@ function BundleCard({ bundle, onClick, onEdit }) {
         <div className="text-4xl mb-2">{bundle.emoji || '🧺'}</div>
         <h3 className="font-semibold text-gray-100 text-sm line-clamp-2">{bundle.name}</h3>
         <p className="text-gray-400 text-xs mt-1">
-          {bundle.item_count} tuote{bundle.item_count !== 1 ? 'tta' : ''}
+          {bundle.item_count} product{bundle.item_count !== 1 ? 's' : ''}
         </p>
       </button>
       <button
         onClick={(e) => { e.stopPropagation(); onEdit(); }}
         className="absolute top-2 right-2 w-8 h-8 rounded-lg text-gray-400 hover:text-gray-100 hover:bg-gray-700 text-sm"
-        aria-label="Muokkaa"
-        title="Muokkaa"
+        aria-label="Edit"
+        title="Edit"
       >
         ✎
       </button>
@@ -536,13 +536,13 @@ function BundlePickerOverlay({ bundle, onConfirm, onClose, busy }) {
           {bundle.emoji || '🧺'} {bundle.name}
         </h3>
         <p className="text-gray-400 text-sm text-center mb-4">
-          Valitse mitkä tuotteet lisätään ostoslistalle.
+          Choose which products to add to the shopping list.
         </p>
         <ul className="space-y-1 mb-5">
           {(bundle.items || []).map((item) => {
             const checked = !unchecked.has(item.product_id);
-            const hint = item.on_list ? 'jo listalla'
-              : item.stock_amount > 0 ? 'varastossa' : '';
+            const hint = item.on_list ? 'on the list'
+              : item.stock_amount > 0 ? 'in stock' : '';
             return (
               <li key={item.id}>
                 <button
@@ -573,14 +573,14 @@ function BundlePickerOverlay({ bundle, onConfirm, onClose, busy }) {
             disabled={busy || checkedIds.length === 0}
             className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-brand-cobalt hover:bg-brand-cobalt-400 active:bg-brand-cobalt-600 disabled:opacity-40 transition-colors"
           >
-            {busy ? 'Lisätään…' : `Lisää ostoslistalle (${checkedIds.length})`}
+            {busy ? 'Adding…' : `Add to shopping list (${checkedIds.length})`}
           </button>
           <button
             onClick={onClose}
             disabled={busy}
             className="w-full py-2 rounded-xl font-semibold text-gray-400 text-sm hover:text-gray-200 transition-colors"
           >
-            Peruuta
+            Cancel
           </button>
         </div>
       </div>
@@ -616,7 +616,7 @@ function BundleEditorOverlay({ bundle, products, onSave, onDelete, onClose, busy
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-lg font-bold text-gray-100 text-center mb-4">
-          {isNew ? 'Uusi setti' : 'Muokkaa settiä'}
+          {isNew ? 'New set' : 'Edit set'}
         </h3>
         <div className="flex gap-2 mb-3">
           <input
@@ -630,7 +630,7 @@ function BundleEditorOverlay({ bundle, products, onSave, onDelete, onClose, busy
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Setin nimi, esim. Taco night"
+            placeholder="Set name, e.g. Taco night"
             className="flex-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-cobalt"
           />
         </div>
@@ -647,7 +647,7 @@ function BundleEditorOverlay({ bundle, products, onSave, onDelete, onClose, busy
                 <button
                   onClick={() => setItems((prev) => prev.filter((x) => x.product_id !== item.product_id))}
                   className="text-gray-400 hover:text-red-400"
-                  aria-label={`Poista ${item.product_name}`}
+                  aria-label={`Remove ${item.product_name}`}
                 >
                   ✕
                 </button>
@@ -661,7 +661,7 @@ function BundleEditorOverlay({ bundle, products, onSave, onDelete, onClose, busy
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Hae tuotetta…"
+          placeholder="Search products…"
           className="w-full px-3 py-2 mb-1 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-cobalt"
         />
         {matches.length > 0 && (
@@ -688,7 +688,7 @@ function BundleEditorOverlay({ bundle, products, onSave, onDelete, onClose, busy
             disabled={busy || !name.trim()}
             className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-brand-cobalt hover:bg-brand-cobalt-400 active:bg-brand-cobalt-600 disabled:opacity-40 transition-colors"
           >
-            {busy ? 'Tallennetaan…' : 'Tallenna'}
+            {busy ? 'Saving…' : 'Save'}
           </button>
           {!isNew && (
             <button
@@ -696,7 +696,7 @@ function BundleEditorOverlay({ bundle, products, onSave, onDelete, onClose, busy
               disabled={busy}
               className="w-full py-2 rounded-xl font-semibold text-red-400 text-sm hover:text-red-300 transition-colors"
             >
-              Poista setti
+              Remove set
             </button>
           )}
           <button
@@ -704,7 +704,7 @@ function BundleEditorOverlay({ bundle, products, onSave, onDelete, onClose, busy
             disabled={busy}
             className="w-full py-2 rounded-xl font-semibold text-gray-400 text-sm hover:text-gray-200 transition-colors"
           >
-            Peruuta
+            Cancel
           </button>
         </div>
       </div>
@@ -730,7 +730,7 @@ export default function App() {
   // Tabs: 'recipes' | 'bundles'
   const [tab, setTab] = useState('recipes');
 
-  // Bundles (Setit)
+  // Bundles (Sets)
   const [bundles, setBundles] = useState([]);
   const [bundlesLoading, setBundlesLoading] = useState(false);
   const [allProducts, setAllProducts] = useState([]);
@@ -800,7 +800,7 @@ export default function App() {
         setRecipes(data.recipes);
       }
     } catch (err) {
-      addToast('Reseptien lataus epäonnistui', 'error');
+      addToast('Could not load recipes', 'error');
     } finally {
       setLoading(false);
     }
@@ -851,16 +851,16 @@ export default function App() {
         url: url.trim(),
       });
       if (data.success) {
-        addToast(`Resepti "${data.name}" tallennettu!`, 'success');
+        addToast(`Recipe "${data.name}" saved`, 'success');
         if (data.skipped?.length) addToast(skippedText(data.skipped), 'info');
         setUrl('');
         loadRecipes();
       } else {
-        addToast(data.error || 'Reseptin haku epäonnistui', 'error');
+        addToast(data.error || 'Could not import the recipe', 'error');
       }
     } catch (err) {
       const msg =
-        err?.response?.data?.error || 'Reseptin haku epäonnistui';
+        err?.response?.data?.error || 'Could not import the recipe';
       addToast(msg, 'error');
     } finally {
       setScraping(false);
@@ -877,11 +877,11 @@ export default function App() {
         if (data.success) {
           setRecipeDetail(data.recipe);
         } else {
-          addToast('Reseptin lataus epäonnistui', 'error');
+          addToast('Could not load the recipe', 'error');
           setSelectedRecipeId(null);
         }
       } catch {
-        addToast('Reseptin lataus epäonnistui', 'error');
+        addToast('Could not load the recipe', 'error');
         setSelectedRecipeId(null);
       } finally {
         setDetailLoading(false);
@@ -897,7 +897,7 @@ export default function App() {
       const { data } = await axios.get(`${API_BACKEND}/recipe/${id}`);
       if (data.success) setRecipeDetail(data.recipe);
     } catch {
-      addToast('Reseptin päivitys epäonnistui', 'error');
+      addToast('Could not refresh the recipe', 'error');
     }
   }, [addToast]);
 
@@ -921,12 +921,12 @@ export default function App() {
           { mode },
         );
         if (data.success) {
-          addToast(`${data.added} ainesta lisätty ostoslistalle`, 'success');
+          addToast(`${data.added} ingredient${data.added !== 1 ? 's' : ''} added to the shopping list`, 'success');
         } else {
-          addToast(data.error || 'Ostoslistalle lisäys epäonnistui', 'error');
+          addToast(data.error || 'Could not add to the shopping list', 'error');
         }
       } catch {
-        addToast('Ostoslistalle lisäys epäonnistui', 'error');
+        addToast('Could not add to the shopping list', 'error');
       }
     },
     [selectedRecipeId, addToast],
@@ -951,21 +951,21 @@ export default function App() {
         const shortfall = data?.shortfall_added?.length || 0;
         const unmatched = data?.unmatched?.length || 0;
         const parts = [];
-        if (deducted) parts.push(`${deducted} vähennetty`);
-        if (shortfall) parts.push(`${shortfall} ostoslistalle`);
-        if (unmatched) parts.push(`${unmatched} muunnos puuttuu`);
+        if (deducted) parts.push(`${deducted} deducted`);
+        if (shortfall) parts.push(`${shortfall} to the shopping list`);
+        if (unmatched) parts.push(`${unmatched} missing a unit conversion`);
         addToast(
-          parts.length ? `🍳 ${parts.join(', ')}` : 'Resepti tehty',
+          parts.length ? `🍳 ${parts.join(', ')}` : 'Cooked',
           unmatched ? 'error' : 'success',
         );
         setCookDialog(null);
-        // Stock changed: the open recipe's colours and the cards' "puuttuu"
+        // Stock changed: the open recipe's colours and the cards' "missing"
         // counts are out of date.
         refreshRecipe(cookDialog.id);
         loadRecipes();
       } catch (err) {
         const detail = err?.response?.data?.detail ?? err.message;
-        addToast(`Reseptin teko epäonnistui: ${detail}`, 'error');
+        addToast(`Cooking failed: ${detail}`, 'error');
       } finally {
         setCookBusy(false);
       }
@@ -985,11 +985,11 @@ export default function App() {
     setDeleteDialog(null);
     try {
       await axios.delete(`${API_BACKEND}/recipe/${id}`);
-      addToast(`Resepti "${name}" poistettu`, 'success');
+      addToast(`Recipe "${name}" removed`, 'success');
       closeDetail();
       loadRecipes();
     } catch {
-      addToast('Reseptin poisto epäonnistui', 'error');
+      addToast('Could not remove the recipe', 'error');
     }
   }, [deleteDialog, addToast, closeDetail, loadRecipes]);
 
@@ -1000,29 +1000,29 @@ export default function App() {
     try {
       const { data } = await axios.post(`${API_BACKEND}/recipe/${recipeDetail.id}/reimport`);
       if (data.success) {
-        const review = data.needs_review ? `, ${data.needs_review} tarkistettavaa` : '';
-        addToast(`Ainekset päivitetty lähteestä (${data.ingredients} ainesta${review})`, 'success');
+        const review = data.needs_review ? `, ${data.needs_review} to check` : '';
+        addToast(`Ingredients updated from source (${data.ingredients} ingredient${data.ingredients !== 1 ? 's' : ''}${review})`, 'success');
         if (data.skipped?.length) addToast(skippedText(data.skipped), 'info');
         openRecipe(recipeDetail.id);
         loadRecipes();
       } else {
-        addToast(data.error || 'Päivitys lähteestä epäonnistui', 'error');
+        addToast(data.error || 'Could not update from source', 'error');
       }
     } catch (err) {
-      addToast(err?.response?.data?.error || 'Päivitys lähteestä epäonnistui', 'error');
+      addToast(err?.response?.data?.error || 'Could not update from source', 'error');
     } finally {
       setReimporting(false);
     }
   }, [recipeDetail, reimporting, addToast, openRecipe, loadRecipes]);
 
-  // ── Bundles (Setit) ───────────────────────────────────────────────
+  // ── Bundles (Sets) ────────────────────────────────────────────────
   const loadBundles = useCallback(async () => {
     setBundlesLoading(true);
     try {
       const { data } = await axios.get(`${API_STORAGE}/bundles`);
       setBundles(Array.isArray(data) ? data : []);
     } catch {
-      addToast('Settien lataus epäonnistui', 'error');
+      addToast('Could not load sets', 'error');
     } finally {
       setBundlesLoading(false);
     }
@@ -1043,7 +1043,7 @@ export default function App() {
       const { data } = await axios.get(`${API_STORAGE}/bundles/${id}`);
       setPickerBundle(data);
     } catch {
-      addToast('Setin lataus epäonnistui', 'error');
+      addToast('Could not load the set', 'error');
     }
   }, [addToast]);
 
@@ -1055,12 +1055,12 @@ export default function App() {
         `${API_STORAGE}/bundles/${pickerBundle.id}/to-shopping`,
         { product_ids: productIds },
       );
-      const parts = [`${data.added} tuotetta lisätty ostoslistalle`];
-      if (data.skipped > 0) parts.push(`${data.skipped} jo listalla`);
+      const parts = [`${data.added} product${data.added !== 1 ? 's' : ''} added to the shopping list`];
+      if (data.skipped > 0) parts.push(`${data.skipped} already on the list`);
       addToast(parts.join(', '), 'success');
       setPickerBundle(null);
     } catch {
-      addToast('Ostoslistalle lisäys epäonnistui', 'error');
+      addToast('Could not add to the shopping list', 'error');
     } finally {
       setPickerBusy(false);
     }
@@ -1075,7 +1075,7 @@ export default function App() {
       const { data } = await axios.get(`${API_STORAGE}/bundles/${bundle.id}`);
       setEditorBundle(data);
     } catch {
-      addToast('Setin lataus epäonnistui', 'error');
+      addToast('Could not load the set', 'error');
     }
   }, [addToast]);
 
@@ -1087,11 +1087,11 @@ export default function App() {
       } else {
         await axios.post(`${API_STORAGE}/bundles`, payload);
       }
-      addToast(`Setti "${payload.name}" tallennettu`, 'success');
+      addToast(`Set "${payload.name}" saved`, 'success');
       setEditorBundle(null);
       loadBundles();
     } catch {
-      addToast('Setin tallennus epäonnistui', 'error');
+      addToast('Could not save the set', 'error');
     } finally {
       setEditorBusy(false);
     }
@@ -1103,11 +1103,11 @@ export default function App() {
     setBundleDeleteDialog(null);
     try {
       await axios.delete(`${API_STORAGE}/bundles/${id}`);
-      addToast(`Setti "${name}" poistettu`, 'success');
+      addToast(`Set "${name}" removed`, 'success');
       setEditorBundle(null);
       loadBundles();
     } catch {
-      addToast('Setin poisto epäonnistui', 'error');
+      addToast('Could not remove the set', 'error');
     }
   }, [bundleDeleteDialog, addToast, loadBundles]);
 
@@ -1119,9 +1119,9 @@ export default function App() {
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
-        <p className="text-gray-400 text-sm">Odotetaan Storage-lisäosaa…</p>
+        <p className="text-gray-400 text-sm">Waiting for the Storage add-on…</p>
         {healthRetries > 3 && (
-          <p className="text-gray-500 text-xs">Yritys {healthRetries}…</p>
+          <p className="text-gray-500 text-xs">Attempt {healthRetries}…</p>
         )}
       </div>
     );
@@ -1130,15 +1130,15 @@ export default function App() {
   if (!storageReady && !storageChecking) {
     return (
       <div className="min-h-screen bg-gray-900 text-gray-100 flex flex-col items-center justify-center gap-4">
-        <p className="text-red-400 text-lg">⚠️ Storage ei tavoitettavissa</p>
+        <p className="text-red-400 text-lg">⚠️ Storage unreachable</p>
         <p className="text-gray-400 text-sm">
-          Yhteyden muodostaminen epäonnistui {healthRetries} yrityksen jälkeen.
+          Could not connect after {healthRetries} attempts.
         </p>
         <button
           onClick={() => window.location.reload()}
           className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm"
         >
-          Yritä uudelleen
+          Retry
         </button>
       </div>
     );
@@ -1159,7 +1159,7 @@ export default function App() {
               tab === 'recipes' ? 'bg-brand-cobalt text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'
             }`}
           >
-            🍽️ Reseptit
+            🍽️ Recipes
           </button>
           <button
             onClick={() => setTab('bundles')}
@@ -1167,7 +1167,7 @@ export default function App() {
               tab === 'bundles' ? 'bg-brand-cobalt text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'
             }`}
           >
-            🧺 Setit
+            🧺 Sets
           </button>
         </div>
 
@@ -1179,7 +1179,7 @@ export default function App() {
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleScrape()}
-              placeholder="Liitä reseptin URL..."
+              placeholder="Paste a recipe URL..."
               className="flex-1 min-w-0 px-4 py-2.5 rounded-xl bg-gray-800 border border-gray-700 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               disabled={scraping}
             />
@@ -1206,10 +1206,10 @@ export default function App() {
                       d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                     />
                   </svg>
-                  Haetaan...
+                  Importing...
                 </span>
               ) : (
-                'Hae'
+                'Import'
               )}
             </button>
           </div>
@@ -1219,12 +1219,12 @@ export default function App() {
       {/* Connection lost banner */}
       {disconnected && (
         <div className="mx-4 mb-2 px-4 py-3 rounded-xl bg-amber-600/90 text-white text-sm font-medium flex items-center justify-between">
-          <span>⚠️ Yhteys katkesi — lataa sivu uudelleen</span>
+          <span>⚠️ Connection lost — reload the page</span>
           <button
             onClick={() => window.location.reload()}
             className="ml-3 px-3 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-xs font-semibold transition-colors"
           >
-            Lataa uudelleen
+            Reload
           </button>
         </div>
       )}
@@ -1235,13 +1235,13 @@ export default function App() {
           <>
             {loading ? (
               <div className="flex justify-center py-20">
-                <div className="text-gray-500 text-sm">Ladataan reseptejä...</div>
+                <div className="text-gray-500 text-sm">Loading recipes...</div>
               </div>
             ) : recipes.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">
                 <div className="text-6xl mb-4">📖</div>
                 <p className="text-gray-400 text-sm">
-                  Ei reseptejä vielä. Liitä reseptin URL ylhäällä aloittaaksesi!
+                  No recipes yet. Paste a recipe URL above to start.
                 </p>
               </div>
             ) : (
@@ -1261,7 +1261,7 @@ export default function App() {
         {tab === 'bundles' && (
           bundlesLoading ? (
             <div className="flex justify-center py-20">
-              <div className="text-gray-500 text-sm">Ladataan settejä...</div>
+              <div className="text-gray-500 text-sm">Loading sets...</div>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -1279,7 +1279,7 @@ export default function App() {
                 className="bg-gray-800/50 border-2 border-dashed border-gray-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 text-gray-500 hover:text-gray-300 hover:border-gray-500 transition-colors min-h-[120px]"
               >
                 <span className="text-3xl">＋</span>
-                <span className="text-sm font-semibold">Uusi setti</span>
+                <span className="text-sm font-semibold">New set</span>
               </button>
             </div>
           )
@@ -1304,7 +1304,7 @@ export default function App() {
       {/* Detail loading overlay */}
       {detailLoading && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="text-gray-300 text-sm">Ladataan reseptiä...</div>
+          <div className="text-gray-300 text-sm">Loading recipe...</div>
         </div>
       )}
 
@@ -1364,8 +1364,8 @@ export default function App() {
           recipeName={bundleDeleteDialog.name}
           onConfirm={handleBundleDeleteConfirm}
           onClose={() => setBundleDeleteDialog(null)}
-          title="Poista setti?"
-          question="Haluatko varmasti poistaa setin"
+          title="Remove set?"
+          question="Remove the set"
         />
       )}
 
