@@ -1,3 +1,10 @@
+## 2.10.0
+
+- Ingredients keep the variant the recipe asks for: "2 prk Valio ruokakermaa Kolme juustoa" now means the cheese-flavoured cream, with plain ruokakerma as a substitute. Flavour, form and preparation count; brand names do not
+- A row covered only by a substitute stays orange and says so: "↺ using Ruokakerma · prefers Ruokakerma kolme juustoa"
+- Fixing an ingredient offers three choices: any kind, prefer this variant, or exactly this
+- Needs Storage 0.29.0. Existing recipes pick up preferred variants when re-imported
+
 ## 2.9.9
 
 - Recipe import works with newer Claude models (5.x), which think before answering: the backend now reads the answer text instead of the first response block, and has more output room so thinking doesn't cut the answer short

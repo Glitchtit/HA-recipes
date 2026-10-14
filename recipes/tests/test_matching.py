@@ -109,6 +109,18 @@ class TestRecipeDetailDelegatesAvailability:
         assert detail["ingredients"][0]["status"] == "green"
         assert detail["instructions"] == ["Step one", "Step two"]
 
+    def test_substitute_details_come_from_storage(self, monkeypatch):
+        self._setup(monkeypatch,
+                    ingredient={"id": 1, "product_id": 5, "amount": 2, "note": "",
+                                "specificity": "prefer", "product_name": "Ruokakerma kolme juustoa"},
+                    availability_status="green")
+        avail = backend._api_get("recipes/99/availability")
+        avail["ingredients"][0].update(substitute=True, preferred_name="Ruokakerma kolme juustoa",
+                                       fallback_name="Ruokakerma")
+        ing = backend._get_recipe_detail(99)["ingredients"][0]
+        assert (ing["specificity"], ing["substitute"], ing["fallback_name"]) == ("prefer", True, "Ruokakerma")
+        assert ing["preferred_name"] == "Ruokakerma kolme juustoa"
+
     def test_missing_availability_row_defaults_red(self, monkeypatch):
         self._setup(monkeypatch,
                     ingredient={"id": 1, "product_id": 5, "amount": 2, "note": "",

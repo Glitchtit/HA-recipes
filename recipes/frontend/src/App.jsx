@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import WhatsNewModal from './components/WhatsNewModal';
 import IngredientFixSheet from './IngredientFixSheet';
-import { formatQty, haveText, recipeBadge, servingsText, skippedText, sortRecipes } from './recipeHelpers';
+import { formatQty, haveText, recipeBadge, servingsText, skippedText, sortRecipes, substituteText } from './recipeHelpers';
 
 // ---------------------------------------------------------------------------
 // Ingress-path awareness
@@ -246,6 +246,9 @@ function RecipeDetail({ recipe, onClose, onAddToShoppingList, onCook, onDelete, 
                   )}
                   {haveText(ing) && (
                     <span className="text-xs opacity-70 ml-2">· {haveText(ing)}</span>
+                  )}
+                  {substituteText(ing) && (
+                    <span className="block text-xs opacity-80 mt-0.5">↺ {substituteText(ing)}</span>
                   )}
                   {ing.needs_review && (
                     <span className="ml-2" title="Unit not recognized, check the amount">⚠</span>

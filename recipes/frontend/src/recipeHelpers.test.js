@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   fixPayload, formatQty, genericWord, haveText, initialBinding, parseAmount, recipeBadge,
-  searchConcepts, servingsText, shouldTeachAlias, skippedText, sortRecipes,
+  searchConcepts, servingsText, shouldTeachAlias, skippedText, sortRecipes, substituteText,
 } from './recipeHelpers.js';
 
 test('quantities use a decimal comma like Storage', () => {
@@ -60,13 +60,18 @@ test('concept search finds concepts only, names starting with the query first', 
   assert.deepEqual(searchConcepts(products, 'k'), []);
 });
 
-test('saving binds the concept loosely, the concept exactly, or a chosen variant exactly', () => {
-  assert.deepEqual(fixPayload({ conceptId: 5, variantId: null, exact: false, amount: '2,5', unitId: 3 }),
+test('saving binds the concept loosely, a variant preferred, or exactly one', () => {
+  assert.deepEqual(fixPayload({ conceptId: 5, variantId: null, mode: 'any', amount: '2,5', unitId: 3 }),
     { product_id: 5, amount: 2.5, unit_id: 3, specificity: 'loose', needs_review: false });
-  assert.deepEqual(fixPayload({ conceptId: 5, variantId: 9, exact: true, amount: 1, unitId: 3 }),
+  assert.deepEqual(fixPayload({ conceptId: 5, variantId: 9, mode: 'exact', amount: 1, unitId: 3 }),
     { product_id: 9, amount: 1, unit_id: 3, specificity: 'strict', needs_review: false });
-  assert.deepEqual(fixPayload({ conceptId: 5, variantId: null, exact: true, amount: '0', unitId: 3 }),
+  assert.deepEqual(fixPayload({ conceptId: 5, variantId: null, mode: 'exact', amount: '0', unitId: 3 }),
     { product_id: 5, amount: 0, unit_id: 3, specificity: 'strict', needs_review: false });
+  assert.deepEqual(fixPayload({ conceptId: 5, variantId: 9, mode: 'prefer', amount: 2, unitId: 3 }),
+    { product_id: 9, amount: 2, unit_id: 3, specificity: 'prefer', needs_review: false });
+  // Preferring the concept itself is the same as "any kind".
+  assert.deepEqual(fixPayload({ conceptId: 5, variantId: null, mode: 'prefer', amount: 2, unitId: 3 }),
+    { product_id: 5, amount: 2, unit_id: 3, specificity: 'loose', needs_review: false });
 });
 
 test('amounts take a decimal comma; anything else is not an amount', () => {
@@ -85,11 +90,22 @@ test('the sheet starts from the current binding, "exactly this" on a top-level i
     { id: 3, name: 'Kanaliemi', kind: 'concept', parent_id: null },
   ];
   assert.deepEqual(initialBinding({ product_id: 2, specificity: 'strict' }, products),
-    { conceptId: 1, variantId: 2, exact: true });
+    { conceptId: 1, variantId: 2, mode: 'exact' });
   assert.deepEqual(initialBinding({ product_id: 3, specificity: 'strict' }, products),
-    { conceptId: 3, variantId: null, exact: true });
+    { conceptId: 3, variantId: null, mode: 'exact' });
   assert.deepEqual(initialBinding({ product_id: 1, specificity: 'loose' }, products),
-    { conceptId: 1, variantId: null, exact: false });
+    { conceptId: 1, variantId: null, mode: 'any' });
+  assert.deepEqual(initialBinding({ product_id: 2, specificity: 'prefer' }, products),
+    { conceptId: 1, variantId: 2, mode: 'prefer' });
+  assert.deepEqual(initialBinding({ product_id: 3, specificity: 'prefer' }, products),
+    { conceptId: 3, variantId: null, mode: 'any' });
+});
+
+test('a substitute row names what is used and what the recipe prefers', () => {
+  assert.equal(substituteText({ substitute: true, fallback_name: 'Ruokakerma',
+    preferred_name: 'Ruokakerma kolme juustoa' }), 'using Ruokakerma · prefers Ruokakerma kolme juustoa');
+  assert.equal(substituteText({ substitute: false, fallback_name: 'Ruokakerma' }), '');
+  assert.equal(substituteText({}), '');
 });
 
 test('an alias is taught only when the word differs from the concept name', () => {

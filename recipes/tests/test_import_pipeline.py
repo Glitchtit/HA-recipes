@@ -57,7 +57,8 @@ def test_import_resolves_lines_in_storage_and_saves_them(storage):
     assert paths[:2] == ["ingredients/resolve", "recipes"]
     sent = storage[0][1]["items"]
     assert sent[1] == {"raw": "1 dl syltsocker", "name": "sokeri", "specific": "hillosokeri",
-                       "amount": 1, "unit_text": "dl", "source_name": "syltsocker"}
+                       "preferred": None, "amount": 1, "unit_text": "dl",
+                       "source_name": "syltsocker"}
     body = storage[1][1]
     assert body["servings"] == 6.0 and body["source_url"] == "https://example.com/rabarberpaj"
     assert body["ingredients"] == [
@@ -234,3 +235,48 @@ def test_without_recipe_data_the_ai_servings_stay(monkeypatch):
     monkeypatch.setattr(backend, "_call_ai_json", lambda prompt: {
         "name": "Piirakka", "servings": 4, "ingredients": [], "instructions": []})
     assert backend._scrape_recipe("https://example.com/p")["servings"] == 4
+
+
+def test_a_preferred_variant_is_forwarded_and_bound_prefer(monkeypatch):
+    """"2 prk Valio ruokakermaa Kolme juustoa": the flavour reaches Storage as
+    `preferred` and the 'prefer' binding is saved, not flattened to loose."""
+    recipe = {**RECIPE, "ingredients": [
+        {"name": "kerma", "specific": "ruokakerma", "preferred": "ruokakerma kolme juustoa",
+         "amount": 2, "unit": "prk", "note": None,
+         "raw": "2 prk Valio ruokakermaa Kolme juustoa", "source_name": "ruokakermaa Kolme juustoa"}]}
+    resolved = [{"index": 0, "product_id": 30, "specificity": "prefer", "amount": 2,
+                 "unit_id": 13, "unit": "prk", "created": True, "needs_review": False}]
+    posts = []
+
+    def fake_post(path, data=None, **_kwargs):
+        posts.append((path, data))
+        if path == "ingredients/resolve":
+            return {"items": resolved, "created": [30]}
+        return {"id": 8} if path == "recipes" else {}
+
+    monkeypatch.setattr(backend, "_api_post", fake_post)
+    monkeypatch.setattr(backend, "_scrape_recipe", lambda url: {**recipe, "source_url": url})
+    backend._handle_scrape("https://example.com/vuoka")
+    assert posts[0][1]["items"][0]["preferred"] == "ruokakerma kolme juustoa"
+    assert posts[1][1]["ingredients"][0]["specificity"] == "prefer"
+
+
+def test_extract_prompt_asks_for_a_brand_free_preferred_variant(monkeypatch):
+    captured = {}
+
+    def fake_call(prompt):
+        captured["prompt"] = prompt
+        return {"name": "x", "servings": 1, "ingredients": [], "instructions": []}
+
+    monkeypatch.setattr(backend, "_call_ai_json", fake_call)
+    backend._extract_recipe_from_summary("dummy", "https://example.com", None)
+    prompt = captured["prompt"]
+    assert '"preferred"' in prompt
+    assert "Kolme juustoa" in prompt and "brand" in prompt.lower()
+
+
+def test_splitting_a_combined_line_drops_the_preferred_variant():
+    out = backend._split_combined([
+        {"name": "suola ja pippuri", "specific": None, "preferred": "savusuola",
+         "amount": None, "raw": "to taste suolaa ja pippuria", "source_name": None}])
+    assert [i.get("preferred") for i in out] == [None, None]

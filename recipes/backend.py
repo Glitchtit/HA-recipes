@@ -561,6 +561,7 @@ Instructions:
    - If an ingredient has NO unit written (just a number + item name, e.g. "2 ägg", "1 citron", "3 tomater"), write it EXACTLY as-is without adding any unit. Do NOT insert g, kg, ml, dl, or any other unit.
    - Examples: "2 ägg" → "2 ägg" (NOT "2 st ägg"), "1 citron" → "1 citron" (NOT "1 g citron")
    - PRESERVE specific variants verbatim: write "parmesan", "gouda", "juustoraaste", "fetajuusto", "mozzarella", "ruisjauho", "ekstraneitsytoliiviöljy", "merisuolahiutaleet", "syltsocker", "vaniljsocker", "florsocker", "farinsocker", "vispgrädde", "matlagningsgrädde", "gräddfil", "margarin", etc. — do NOT collapse them to a generic ("cheese", "flour", "oil", "salt", "socker", "smör", "grädde"). Translation to Finnish happens in the next step; here we just want the exact variant name from the source preserved.
+   - Keep flavour, form and preparation words exactly as written ("ruokakermaa Kolme juustoa", "cheddar raastetta", "hunajamarinoituja fileesuikaleita"); they are kept as a preference later.
 4. List the cooking steps numbered 1, 2, 3...
 
 Write ONLY the clean recipe. No extra commentary, no markdown formatting."""
@@ -585,7 +586,7 @@ Return a JSON object with exactly these fields:
   "name": "Recipe name (in the original language of the recipe)",
   "servings": <number of servings as integer>,
   "ingredients": [
-    {{"name": "generic Finnish ingredient name", "specific": "specific Finnish variant or null", "amount": <number or null>, "unit": "unit string or null", "note": "any note like 'chopped' or null", "raw": "the ingredient line exactly as written in the summary", "source_name": "the ingredient name exactly as written in the summary, without amount, unit or note"}}
+    {{"name": "generic Finnish ingredient name", "specific": "specific Finnish variant or null", "preferred": "brand-free Finnish name of the exact variant or null", "amount": <number or null>, "unit": "unit string or null", "note": "any note like 'chopped' or null", "raw": "the ingredient line exactly as written in the summary", "source_name": "the ingredient name exactly as written in the summary, without amount, unit or note"}}
   ],
   "instructions": ["Step 1 text", "Step 2 text", ...]
 }}
@@ -626,6 +627,23 @@ SPECIFICITY RULES (CRITICAL — drives stock matching):
   "2 tsk vaniljsocker" → {{"name": "sokeri", "specific": "vaniljasokeri"}}
   "2 dl vispgrädde" → {{"name": "kerma", "specific": "vispikerma"}}
   "1 msk margarin" → {{"name": "voi", "specific": "margariini"}}
+
+PREFERRED VARIANT RULES (keeps an important but optional detail):
+- "preferred" names the EXACT variant when the line adds a flavour, form or variety beyond "specific"
+  that the cook would want but could swap for the plain "specific": flavoured ("Kolme juustoa",
+  "valkosipuli", "chili"), form ("raaste" grated, "kuutio" cube, "suikale" strips, "viipale"),
+  preparation ("savustettu", "hunajamarinoitu", "pakaste"), variety ("laktoositon" when written).
+- Write it in Finnish as the product would be named, brand-free: never a brand or product line
+  (Valio, Pirkka, Arla, Atria, Juustomestari, Keittiön, Eila). A line that adds only a brand → null.
+- null when the line adds nothing beyond "specific" (or "name"), and for interchangeable
+  descriptors such as long-grain, fresh, large.
+- Examples:
+  "2 prk Valio ruokakermaa Kolme juustoa" → {{"name": "kerma", "specific": "ruokakerma", "preferred": "ruokakerma kolme juustoa"}}
+  "½ pussia Valio Juustomestarin cheddar raastetta" → {{"name": "juusto", "specific": "cheddar", "preferred": "cheddarraaste"}}
+  "450 g hunajamarinoituja broilerin fileesuikaleita" → {{"name": "kana", "specific": "kanan suikale", "preferred": "hunajamarinoitu kanan suikale"}}
+  "1 kanaliemikuutio" → {{"name": "liemi", "specific": "kanaliemi", "preferred": "kanaliemikuutio"}}
+  "2 dl Valio vispikermaa" → {{"name": "kerma", "specific": "vispikerma", "preferred": null}}
+  "3½ dl pitkäjyväistä riisiä" → {{"name": "riisi", "specific": null, "preferred": null}}
 
 "ONE INGREDIENT PER ITEM" RULE:
 - A line naming several things at once ("to taste suolaa ja pippuria", "salt and pepper", "salt, peppar och timjan") → a separate ingredient object for each thing, every one with the same "raw" line. Never one ingredient named "suola ja pippuri".
@@ -686,7 +704,7 @@ def _split_combined(ingredients: list) -> list:
             continue
         sources = [p for p in _COMBINED_RE.split(ing.get("source_name") or "") if p.strip()]
         for i, part in enumerate(parts):
-            out.append({**ing, "name": part.strip(), "specific": None,
+            out.append({**ing, "name": part.strip(), "specific": None, "preferred": None,
                         "source_name": sources[i].strip() if len(sources) == len(parts) else None})
     return out
 
@@ -739,6 +757,7 @@ def _resolve_ingredients(ingredients: list[dict]) -> list[dict]:
             "raw": ing.get("raw"),
             "name": ing.get("name"),
             "specific": ing.get("specific"),
+            "preferred": ing.get("preferred"),
             "amount": ing.get("amount"),
             "unit_text": ing.get("unit"),
             "source_name": ing.get("source_name"),
@@ -761,7 +780,7 @@ def _ingredient_row(ing: dict, res: dict, idx: int) -> dict:
         "unit_id": int(res["unit_id"]),
         "note": " — ".join(note_parts),
         "sort_order": idx,
-        "specificity": specificity if specificity in ("strict", "loose") else "loose",
+        "specificity": specificity if specificity in ("strict", "loose", "prefer") else "loose",
         "raw_text": ing.get("raw") or None,
         "needs_review": bool(res.get("needs_review")),
     }
@@ -927,6 +946,9 @@ def _get_recipe_detail(recipe_id: int) -> dict:
             "status": a.get("status", "red"),
             "available": a.get("available"),
             "approx": bool(a.get("approx")),
+            "substitute": bool(a.get("substitute")),
+            "preferred_name": a.get("preferred_name"),
+            "fallback_name": a.get("fallback_name"),
             "raw_text": pos.get("raw_text"),
             "needs_review": bool(pos.get("needs_review")),
         })

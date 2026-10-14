@@ -5,7 +5,7 @@ import {
 } from './recipeHelpers';
 
 // Corrects one recipe ingredient when the import bound it wrong: which
-// ingredient it is, any variant or exactly one, and the amount. When the
+// ingredient it is, any variant, one preferred or exactly one, and the amount. When the
 // ingredient changes, saving can also remember the recipe's word for it (an
 // alias in Storage), so the next import and a re-import bind it right. That
 // is opt-in: the word is the recipe's generic word ("kerma"), and remembering
@@ -17,7 +17,7 @@ export default function IngredientFixSheet({ apiStorage, recipeId, ingredient, o
   const [conceptId, setConceptId] = useState(null);
   const [startConceptId, setStartConceptId] = useState(null);
   const [variantId, setVariantId] = useState(null);
-  const [exact, setExact] = useState(false);
+  const [mode, setMode] = useState('any');
   const [amount, setAmount] = useState(String(ingredient.amount_needed ?? '').replace('.', ','));
   const [unitId, setUnitId] = useState(ingredient.unit_id ?? null);
   const [teach, setTeach] = useState(false);
@@ -35,7 +35,7 @@ export default function IngredientFixSheet({ apiStorage, recipeId, ingredient, o
         setConceptId(start.conceptId);
         setStartConceptId(start.conceptId);
         setVariantId(start.variantId);
-        setExact(start.exact);
+        setMode(start.mode);
       })
       .catch(() => onToast?.('Could not load products', 'error'));
     return () => { cancelled = true; };
@@ -60,7 +60,7 @@ export default function IngredientFixSheet({ apiStorage, recipeId, ingredient, o
     setSaving(true);
     try {
       await axios.put(`${apiStorage}/recipes/${recipeId}/ingredients/${ingredient.id}`,
-        fixPayload({ conceptId, variantId, exact, amount, unitId }));
+        fixPayload({ conceptId, variantId, mode, amount, unitId }));
       if (canTeach && teach) {
         try {
           await axios.post(`${apiStorage}/products/${conceptId}/aliases`, { alias: word });
@@ -118,7 +118,7 @@ export default function IngredientFixSheet({ apiStorage, recipeId, ingredient, o
               {hits.map((p) => (
                 <li key={p.id}>
                   <button
-                    onClick={() => { setConceptId(p.id); setVariantId(null); setExact(false); setQuery(''); }}
+                    onClick={() => { setConceptId(p.id); setVariantId(null); setMode('any'); setQuery(''); }}
                     className="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-gray-700"
                   >
                     {p.name}
@@ -132,14 +132,22 @@ export default function IngredientFixSheet({ apiStorage, recipeId, ingredient, o
         <div>
           <div className={label}>Will any kind do?</div>
           <div className="mt-1 flex gap-2">
-            <button onClick={() => { setExact(false); setVariantId(null); }} className={toggle(!exact)}>
+            <button onClick={() => { setMode('any'); setVariantId(null); }} className={toggle(mode === 'any')}>
               Any kind
             </button>
-            <button onClick={() => setExact(true)} className={toggle(exact)}>
+            {variants.length > 0 && (
+              <button onClick={() => setMode('prefer')} className={toggle(mode === 'prefer')}>
+                Prefer this
+              </button>
+            )}
+            <button onClick={() => setMode('exact')} className={toggle(mode === 'exact')}>
               Exactly this
             </button>
           </div>
-          {exact && variants.length > 0 && (
+          {mode === 'prefer' && (
+            <p className="text-xs text-gray-500 mt-1">Other kinds count as a substitute</p>
+          )}
+          {mode !== 'any' && variants.length > 0 && (
             <select
               value={variantId ?? ''}
               onChange={(e) => setVariantId(e.target.value ? Number(e.target.value) : null)}

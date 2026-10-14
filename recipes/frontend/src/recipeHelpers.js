@@ -65,27 +65,38 @@ export function parseAmount(text) {
 }
 
 // Where the fix sheet starts: the ingredient's concept, the variant it is
-// bound to, and whether only that one will do. An "exactly this" binding on
-// a top-level ingredient has no variant but is still exact.
+// bound to, and how much that variant matters: any kind of the concept,
+// the variant preferred (others are substitutes), or exactly it. An
+// "exactly this" binding on a top-level ingredient has no variant but is
+// still exact; preferring a top-level ingredient is just "any kind".
 export function initialBinding(ingredient, products) {
   const bound = products.find((p) => p.id === ingredient.product_id);
-  const exact = ingredient.specificity === 'strict';
-  if (exact && bound?.parent_id) {
-    return { conceptId: bound.parent_id, variantId: bound.id, exact };
+  const mode = { strict: 'exact', prefer: 'prefer' }[ingredient.specificity] || 'any';
+  if (mode !== 'any' && bound?.parent_id) {
+    return { conceptId: bound.parent_id, variantId: bound.id, mode };
   }
-  return { conceptId: ingredient.product_id, variantId: null, exact };
+  return { conceptId: ingredient.product_id, variantId: null, mode: mode === 'exact' ? 'exact' : 'any' };
 }
 
 // The ingredient update the fix sheet saves: any variant of the concept
-// (loose), or exactly the chosen variant or the concept itself (strict).
-export function fixPayload({ conceptId, variantId, exact, amount, unitId }) {
+// (loose), the chosen variant preferred, or exactly the chosen variant or
+// the concept itself (strict). Preferring no variant is "any kind".
+export function fixPayload({ conceptId, variantId, mode, amount, unitId }) {
+  const specificity = mode === 'exact' ? 'strict' : (mode === 'prefer' && variantId ? 'prefer' : 'loose');
   return {
-    product_id: (exact && variantId) || conceptId,
+    product_id: (specificity !== 'loose' && variantId) || conceptId,
     amount: parseAmount(amount),
     unit_id: unitId,
-    specificity: exact ? 'strict' : 'loose',
+    specificity,
     needs_review: false,
   };
+}
+
+// The hint on a row whose preferred variant is missing but whose substitute
+// covers it: "using Ruokakerma · prefers Ruokakerma kolme juustoa".
+export function substituteText(ing) {
+  if (!ing?.substitute || !ing.fallback_name) return '';
+  return `using ${ing.fallback_name} · prefers ${ing.preferred_name || ing.product_name}`;
 }
 
 // Remembering the word as an alias only helps when it is not the name itself.
