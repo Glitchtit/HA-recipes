@@ -174,6 +174,16 @@ def _call_ollama_json(prompt: str) -> dict | list | None:
     return None
 
 
+def _claude_response_text(response) -> str:
+    """Join the text blocks of a Claude response.
+
+    Newer models think by default, so content[0] may be a thinking block.
+    """
+    if response.stop_reason == "max_tokens":
+        log.warning("Claude response hit max_tokens; output may be truncated")
+    return "".join(b.text for b in response.content if b.type == "text")
+
+
 def _call_claude_json(prompt: str) -> dict | list | None:
     """Call Claude API and parse the response as JSON with retries."""
     try:
@@ -187,7 +197,7 @@ def _call_claude_json(prompt: str) -> dict | list | None:
         try:
             response = client.messages.create(
                 model=CLAUDE_MODEL,
-                max_tokens=8192,
+                max_tokens=16000,
                 messages=[{"role": "user", "content": prompt}],
             )
             usage = response.usage
@@ -196,7 +206,7 @@ def _call_claude_json(prompt: str) -> dict | list | None:
                 getattr(usage, "input_tokens", "?"),
                 getattr(usage, "output_tokens", "?"),
             )
-            text = response.content[0].text or ""
+            text = _claude_response_text(response)
             text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
             text = _extract_json_text(text)
             return json.loads(text)
@@ -258,10 +268,10 @@ def _call_claude_text(prompt: str) -> str | None:
         try:
             response = client.messages.create(
                 model=CLAUDE_MODEL,
-                max_tokens=4096,
+                max_tokens=16000,
                 messages=[{"role": "user", "content": prompt}],
             )
-            return response.content[0].text or ""
+            return _claude_response_text(response)
         except Exception as exc:
             log.warning("Claude text attempt %d/%d failed: %s", attempt, _GEMINI_MAX_RETRIES, exc)
             if attempt < _GEMINI_MAX_RETRIES:

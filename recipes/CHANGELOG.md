@@ -1,3 +1,7 @@
+## 2.9.9
+
+- Recipe import works with newer Claude models (5.x), which think before answering: the backend now reads the answer text instead of the first response block, and has more output room so thinking doesn't cut the answer short
+
 ## 2.9.8
 
 - The whole interface is in English: Recipes and Sets tabs, Import, servings, Ingredients, Steps, "N missing", the cook, shopping-list and ingredient-fix dialogs, and all messages. Recipe, ingredient and product names stay in Finnish, and recipes in Finnish or Swedish still import as before
