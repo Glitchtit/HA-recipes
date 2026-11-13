@@ -15,6 +15,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.service import async_get_all_descriptions
 
 from .clients.recipes import RecipesClient
 from .clients.storage import StorageClient
@@ -133,6 +134,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             supports_response=SupportsResponse.ONLY,
         )
 
+    # llm.py builds its tools from HA's action description cache, which is
+    # otherwise only filled once a frontend asks for it.
+    await async_get_all_descriptions(hass)
     return True
 
 
