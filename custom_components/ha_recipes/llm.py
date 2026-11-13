@@ -15,6 +15,14 @@ from .const import DOMAIN
 # scrape_url is left out: nobody dictates a URL.
 ACTIONS = ("search", "suggest_from_stock")
 
+# Some agents load tools on demand (tool search): this line is how they
+# learn the tools exist.
+PROMPT = (
+    "Saved recipes live in Recipes: ha_recipes__search finds one by name and"
+    " ha_recipes__suggest_from_stock says what can be cooked right now from what"
+    " is in stock."
+)
+
 
 @callback
 def async_get_tools(
@@ -28,4 +36,4 @@ def async_get_tools(
         for action in ACTIONS
         if hass.services.has_service(DOMAIN, action)
     ]
-    return LLMTools(tools=tools) if tools else None
+    return LLMTools(tools=tools, prompt=PROMPT) if tools else None
