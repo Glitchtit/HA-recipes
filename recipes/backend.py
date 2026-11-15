@@ -520,15 +520,22 @@ def _fix_countable_units(ingredients: list[dict]) -> list[dict]:
     Prevents "2 kananmuna" being stored as "2 g kananmuna" which is nonsensical.
     Only triggers when amount <= 50 (larger values are plausible weights).
     Kilograms are left alone: "1 kg perunoita" is a real weight.
+    A keyword counts only at the end of the name, where a Finnish compound
+    puts its head word: "keltasipuli" is an onion, "paprikajauhe" a powder.
     """
     for ing in ingredients:
         if not isinstance(ing, dict):
             continue
-        name = (ing.get("name") or "").lower()
+        name = (ing.get("name") or "").lower().strip()
         unit = (ing.get("unit") or "").lower()
-        amount = ing.get("amount")
-        if unit == "g" and amount is not None and float(amount) <= 50:
-            if any(kw in name for kw in _COUNTABLE_KEYWORDS):
+        if unit != "g":
+            continue
+        try:
+            amount = float(ing.get("amount"))
+        except (TypeError, ValueError):
+            continue
+        if amount <= 50:
+            if any(name.endswith(kw) for kw in _COUNTABLE_KEYWORDS):
                 log.info("_fix_countable_units: %s %s %s → kpl", amount, unit, name)
                 ing["unit"] = "kpl"
     return ingredients
