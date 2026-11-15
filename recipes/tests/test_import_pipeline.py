@@ -119,6 +119,20 @@ def test_kilograms_of_a_countable_item_stay_kilograms():
     assert [i["unit"] for i in out] == ["kg", "kpl"]
 
 
+def test_grams_of_a_powder_or_puree_stay_grams():
+    """Live finding: "10 g paprikajauhe" became 10 kpl because "paprika" is
+    somewhere in the name. Only the head word (the end of a Finnish compound)
+    decides; a non-numeric amount is skipped instead of failing the import."""
+    stays = ["paprikajauhe", "savupaprikajauhe", "valkosipulijauhe", "chilijauhe",
+             "chilihiutale", "tomaattipyree", "sitruunamehu", "leipäjuusto",
+             "kananmunankeltuainen", "sipulikeittoaines", "porkkanaraaste", "omenasose"]
+    pieces = ["lime", "kananmuna", "keltasipuli", "valkosipulinkynsi", "Punasipuli "]
+    out = backend._fix_countable_units(
+        [{"name": n, "amount": 10, "unit": "g"} for n in stays + pieces]
+        + [{"name": "kananmuna", "amount": "½", "unit": "g"}])
+    assert [i["unit"] for i in out] == ["g"] * len(stays) + ["kpl"] * len(pieces) + ["g"]
+
+
 def test_extract_prompt_treats_milk_fat_levels_as_plain_milk(monkeypatch):
     """Live finding (re-import): "Arla Ko® Standardmjölk" became the variant
     "Täysmaito" in one run and plain "maito" in the next. Milk fat levels are

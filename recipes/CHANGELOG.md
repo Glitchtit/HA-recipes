@@ -1,3 +1,8 @@
+## 2.10.1
+
+- Small gram amounts of powders, purées and the like stay grams on import: "10 g paprikajauhe", "5 g valkosipulijauhe", "30 g tomaattipyree" and "20 g kananmunankeltuainen" are no longer saved as pieces. Only the end of the name decides, so "keltasipuli" and "kananmuna" in grams still become pieces
+- An ingredient with a non-numeric amount no longer fails the whole import
+
 ## 2.10.0
 
 - Ingredients keep the variant the recipe asks for: "2 prk Valio ruokakermaa Kolme juustoa" now means the cheese-flavoured cream, with plain ruokakerma as a substitute. Flavour, form and preparation count; brand names do not
