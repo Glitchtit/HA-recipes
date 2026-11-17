@@ -53,6 +53,14 @@ def test_reimport_replaces_ingredients_and_servings(storage, monkeypatch):
                       "skipped": ["1 st ???"]}
 
 
+@pytest.mark.parametrize("servings", ["4-6", -2, [4], None])
+def test_reimport_with_unusable_servings_keeps_the_old_ones(storage, monkeypatch, servings):
+    monkeypatch.setattr(backend, "_scrape_recipe", lambda url: {**RECIPE, "servings": servings})
+    backend._handle_reimport(5)
+    puts = [path for verb, path, _ in storage if verb == "PUT"]
+    assert puts == ["recipes/5/ingredients"]
+
+
 def test_reimport_needs_a_source_url(storage, monkeypatch):
     monkeypatch.setattr(backend, "_scrape_recipe", lambda url: pytest.fail("must not fetch"))
     with pytest.raises(ValueError):

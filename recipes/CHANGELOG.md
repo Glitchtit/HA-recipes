@@ -3,6 +3,7 @@
 - A page with no readable ingredients (a cookie or login wall, for example) is no longer saved as an empty recipe. The import stops with a message saying what was missing
 - An import that cannot be used no longer leaves new products behind in Storage: the recipe is checked before its ingredients are sent there
 - Servings the AI wrote as a range ("4-6") or steps it returned in an odd shape no longer fail the import. The recipe is saved with the default 4 servings and the steps that are plain text
+- A re-import that reads servings as a range ("4-6") no longer fails after the ingredients were already replaced; the recipe keeps its servings
 - A wrong model name or a rejected API key fails right away with the provider's own message instead of after four tries. Rate limits, timeouts, connection problems and server errors are still retried
 - Default models are now `gemini-3.6-flash` and `claude-haiku-5-5`. A model name already saved in the add-on configuration stays as it is; change it there if it names an older model
 

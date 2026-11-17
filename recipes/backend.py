@@ -1106,8 +1106,9 @@ def _handle_reimport(recipe_id: int) -> dict:
     if not rows:
         raise ValueError("The re-import found no ingredients; the recipe was left unchanged")
     _api_put(f"recipes/{recipe_id}/ingredients", {"ingredients": rows})
-    if recipe_data.get("servings"):
-        _api_put(f"recipes/{recipe_id}", {"servings": float(recipe_data["servings"])})
+    servings = _validate_recipe({**recipe_data, "name": "-"}).get("servings")
+    if servings:  # an unusable value ("4-6") keeps the recipe's own
+        _api_put(f"recipes/{recipe_id}", {"servings": servings})
     _reconcile_after_import()
     return {
         "recipe_id": recipe_id,
