@@ -32,11 +32,11 @@ The Dockerfile is a **multi-stage build**: Node 20 builds the React frontend, th
 {
   "ai_provider": "gemini",
   "gemini_api_key": "",
-  "gemini_model": "gemini-2.0-flash",
+  "gemini_model": "gemini-3.6-flash",
   "ollama_url": "",
   "ollama_model": "llama3",
   "claude_api_key": "",
-  "claude_model": "claude-3-5-haiku-20241022",
+  "claude_model": "claude-haiku-5-5",
   "flaresolverr_url": "",
   "debug": false
 }

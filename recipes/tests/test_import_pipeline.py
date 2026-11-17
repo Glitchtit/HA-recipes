@@ -85,6 +85,38 @@ def test_a_failed_resolve_saves_nothing(monkeypatch):
     assert "recipes" not in posts
 
 
+@pytest.mark.parametrize("broken", [
+    {"name": None}, {"name": "  "},                       # no recipe name
+    {"ingredients": []}, {"ingredients": None},           # cookie wall: nothing to cook with
+    {"ingredients": ["2 dl maitoa"]},                     # lines, not ingredient objects
+])
+def test_a_broken_extraction_sends_nothing_to_storage(storage, monkeypatch, broken):
+    """Checked before Storage resolves anything: resolving creates concepts,
+    which a failed import would leave behind in the catalog."""
+    monkeypatch.setattr(backend, "_scrape_recipe", lambda url: {**RECIPE, **broken})
+    with pytest.raises(ValueError, match="nothing was imported"):
+        backend._handle_scrape("https://example.com/x")
+    assert storage == []
+
+
+@pytest.mark.parametrize("servings", ["4-6", -2, [4]])
+def test_unusable_servings_fall_back_to_the_default(storage, monkeypatch, servings):
+    monkeypatch.setattr(backend, "_scrape_recipe", lambda url: {**RECIPE, "servings": servings})
+    backend._handle_scrape("https://example.com/x")
+    assert storage[1][1]["servings"] == 4.0
+
+
+@pytest.mark.parametrize("instructions,steps", [
+    (None, ""),
+    ("Sekoita ja paista.", "Sekoita ja paista."),
+    (["Sekoita.", {"step": 2}, None, "Paista."], "Sekoita.\nPaista."),
+])
+def test_instructions_are_saved_as_lines_of_text(storage, monkeypatch, instructions, steps):
+    monkeypatch.setattr(backend, "_scrape_recipe", lambda url: {**RECIPE, "instructions": instructions})
+    backend._handle_scrape("https://example.com/x")
+    assert storage[1][1]["description"] == f"Source: {RECIPE['source_url']}\n\n{steps}"
+
+
 def test_extract_prompt_asks_for_raw_lines_and_container_units(monkeypatch):
     captured = {}
 

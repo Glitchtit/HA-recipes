@@ -57,8 +57,8 @@ Optional. Adds actions that automations, scripts and voice assistants can call.
 | Option | Default | Description |
 |--------|---------|-------------|
 | `ai_provider` | `gemini` | `gemini`, `claude` or `ollama` |
-| `gemini_api_key` / `gemini_model` | — / `gemini-2.0-flash` | Google Gemini API key and model |
-| `claude_api_key` / `claude_model` | — / `claude-3-5-haiku-20241022` | Anthropic API key and model |
+| `gemini_api_key` / `gemini_model` | — / `gemini-3.6-flash` | Google Gemini API key and model |
+| `claude_api_key` / `claude_model` | — / `claude-haiku-5-5` | Anthropic API key and model |
 | `ollama_url` / `ollama_model` | — / `llama3` | Local Ollama server and model |
 | `flaresolverr_url` | — | FlareSolverr address, e.g. `http://192.168.1.10:8191`, for Cloudflare-protected recipe sites |
 | `debug` | `false` | Verbose logging |

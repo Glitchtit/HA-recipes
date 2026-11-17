@@ -41,11 +41,11 @@ STORAGE_URL = os.environ.get("STORAGE_URL", "").rstrip("/")
 
 AI_PROVIDER: str = os.environ.get("AI_PROVIDER", "gemini").strip().lower()
 GEMINI_KEY: str = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash") or "gemini-2.0-flash"
+GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash") or "gemini-3.6-flash"
 OLLAMA_URL: str = os.environ.get("OLLAMA_URL", "").rstrip("/")
 OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "llama3") or "llama3"
 CLAUDE_API_KEY: str = os.environ.get("CLAUDE_API_KEY", "")
-CLAUDE_MODEL: str = os.environ.get("CLAUDE_MODEL", "claude-3-5-haiku-20241022") or "claude-3-5-haiku-20241022"
+CLAUDE_MODEL: str = os.environ.get("CLAUDE_MODEL", "claude-haiku-5-5") or "claude-haiku-5-5"
 # Optional FlareSolverr instance for Cloudflare-fronted recipe sites (k-ruoka.fi).
 FLARESOLVERR_URL: str = os.environ.get("FLARESOLVERR_URL", "").strip().rstrip("/")
 
@@ -91,6 +91,31 @@ def _extract_json_text(text: str) -> str:
     return text.strip()
 
 
+def _status(exc: Exception) -> int | None:
+    """HTTP status of a provider error: the anthropic SDK carries it on
+    .status_code, google-genai on .code, requests on .response. None for
+    network errors and bad JSON."""
+    for status in (getattr(exc, "status_code", None), getattr(exc, "code", None),
+                   getattr(getattr(exc, "response", None), "status_code", None)):
+        if isinstance(status, int):
+            return status
+    return None
+
+
+def _retryable(exc: Exception) -> bool:
+    """Timeouts, connection errors, unparseable answers, rate limits and
+    server errors may pass on a second try. Any other 4xx will not."""
+    status = _status(exc)
+    return status is None or status in (408, 409, 429) or status >= 500
+
+
+def _refusal(provider: str, exc: Exception) -> str:
+    """A refused request in the provider's own words. Keys travel in headers,
+    so neither the URL nor the body holds one."""
+    said = getattr(exc, "message", None) or getattr(getattr(exc, "response", None), "text", None) or exc
+    return f"{provider} refused the request (HTTP {_status(exc)}: {str(said).strip()[:300]})"
+
+
 def _get_gemini() -> genai.Client:
     global _gemini_client
     if _gemini_client is None:
@@ -128,6 +153,8 @@ def _call_gemini_json(prompt: str) -> dict | list | None:
             text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
             return json.loads(text)
         except Exception as exc:
+            if not _retryable(exc):
+                raise ValueError(_refusal("Gemini", exc)) from exc
             exc_str = str(exc)
             log.warning("Gemini attempt %d/%d failed: %s", attempt, _GEMINI_MAX_RETRIES, exc)
             if attempt < _GEMINI_MAX_RETRIES:
@@ -168,6 +195,8 @@ def _call_ollama_json(prompt: str) -> dict | list | None:
             content = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", content)
             return json.loads(content)
         except Exception as exc:
+            if not _retryable(exc):
+                raise ValueError(_refusal("Ollama", exc)) from exc
             log.warning("Ollama attempt %d/%d failed: %s", attempt, _GEMINI_MAX_RETRIES, exc)
             if attempt < _GEMINI_MAX_RETRIES:
                 time.sleep(2 ** attempt)
@@ -192,7 +221,7 @@ def _call_claude_json(prompt: str) -> dict | list | None:
         log.error("anthropic package not installed; cannot call Claude")
         return None
     _MAX_RETRIES = _GEMINI_MAX_RETRIES
-    client = _anthropic.Anthropic(api_key=CLAUDE_API_KEY)
+    client = _anthropic.Anthropic(api_key=CLAUDE_API_KEY, max_retries=0)  # we retry ourselves
     for attempt in range(1, _MAX_RETRIES + 1):
         try:
             response = client.messages.create(
@@ -211,6 +240,8 @@ def _call_claude_json(prompt: str) -> dict | list | None:
             text = _extract_json_text(text)
             return json.loads(text)
         except Exception as exc:
+            if not _retryable(exc):
+                raise ValueError(_refusal("Claude", exc)) from exc
             log.warning("Claude attempt %d/%d failed: %s", attempt, _MAX_RETRIES, exc)
             if attempt < _MAX_RETRIES:
                 time.sleep(2 ** attempt)
@@ -246,6 +277,8 @@ def _call_gemini_text(prompt: str) -> str | None:
                 )
             return resp.text or ""
         except Exception as exc:
+            if not _retryable(exc):
+                raise ValueError(_refusal("Gemini", exc)) from exc
             exc_str = str(exc)
             log.warning("Gemini text attempt %d/%d failed: %s", attempt, _GEMINI_MAX_RETRIES, exc)
             if attempt < _GEMINI_MAX_RETRIES:
@@ -263,7 +296,7 @@ def _call_claude_text(prompt: str) -> str | None:
     except ImportError:
         log.error("anthropic package not installed; cannot call Claude")
         return None
-    client = _anthropic.Anthropic(api_key=CLAUDE_API_KEY)
+    client = _anthropic.Anthropic(api_key=CLAUDE_API_KEY, max_retries=0)  # we retry ourselves
     for attempt in range(1, _GEMINI_MAX_RETRIES + 1):
         try:
             response = client.messages.create(
@@ -273,6 +306,8 @@ def _call_claude_text(prompt: str) -> str | None:
             )
             return _claude_response_text(response)
         except Exception as exc:
+            if not _retryable(exc):
+                raise ValueError(_refusal("Claude", exc)) from exc
             log.warning("Claude text attempt %d/%d failed: %s", attempt, _GEMINI_MAX_RETRIES, exc)
             if attempt < _GEMINI_MAX_RETRIES:
                 time.sleep(2 ** attempt)
@@ -295,6 +330,8 @@ def _call_ollama_text(prompt: str) -> str | None:
             resp.raise_for_status()
             return resp.json()["message"]["content"]
         except Exception as exc:
+            if not _retryable(exc):
+                raise ValueError(_refusal("Ollama", exc)) from exc
             log.warning("Ollama text attempt %d/%d failed: %s", attempt, _GEMINI_MAX_RETRIES, exc)
             if attempt < _GEMINI_MAX_RETRIES:
                 time.sleep(2 ** attempt)
@@ -411,15 +448,6 @@ def _fetch_html(url: str) -> str:
         )
     r.raise_for_status()
     return r.text
-
-
-def _fetch_page(url: str) -> str:
-    """Fetch a web page and return cleaned text content."""
-    soup = BeautifulSoup(_fetch_html(url), "html.parser")
-    # Remove script/style tags
-    for tag in soup(["script", "style", "nav", "footer", "header"]):
-        tag.decompose()
-    return soup.get_text(separator="\n", strip=True)[:15000]
 
 
 def _extract_image_url(url: str, html: str | None = None) -> str | None:
@@ -1019,11 +1047,39 @@ def _delete_recipe(recipe_id: int) -> None:
 # ---------------------------------------------------------------------------
 # Full scrape pipeline
 # ---------------------------------------------------------------------------
+def _validate_recipe(data: dict) -> dict:
+    """Check an extracted recipe before anything is sent to Storage, where
+    resolving the ingredients already creates concepts. Raises ValueError
+    with a message for the user; tidies instructions and servings."""
+    name = data.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("No recipe name could be read from the page, so nothing was imported")
+    ingredients = data.get("ingredients")
+    if not (isinstance(ingredients, list) and ingredients and all(isinstance(i, dict) for i in ingredients)):
+        raise ValueError(
+            "No ingredients could be read from the page, so nothing was imported. "
+            "The page may need a login or cookie consent first"
+        )
+    instructions = data.get("instructions")
+    if isinstance(instructions, str):
+        instructions = [instructions]
+    elif not isinstance(instructions, list):
+        instructions = []
+    data = {**data, "name": name.strip(), "instructions": [s for s in instructions if isinstance(s, str)]}
+    try:
+        servings = float(data.pop("servings", None))
+    except (TypeError, ValueError):
+        servings = 0.0
+    if 0 < servings < float("inf"):  # anything else falls back to the default on save
+        data["servings"] = servings
+    return data
+
+
 def _handle_scrape(url: str) -> dict:
-    """Full pipeline: scrape the page, let Storage resolve every ingredient
-    line into a concept, then save the recipe."""
+    """Full pipeline: scrape the page, check what was extracted, let Storage
+    resolve every ingredient line into a concept, then save the recipe."""
     log.info("Scraping recipe from: %s", url)
-    recipe_data = _scrape_recipe(url)
+    recipe_data = _validate_recipe(_scrape_recipe(url))
     log.debug(
         "Extracted recipe: '%s' with %d ingredients",
         recipe_data.get("name"),
