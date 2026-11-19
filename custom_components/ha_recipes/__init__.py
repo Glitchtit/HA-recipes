@@ -68,12 +68,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         slug_patterns=[ADDON_SLUG_STORAGE_PATTERN], port=STORAGE_PORT
     )
 
-    recipes = RecipesClient(recipes_url) if recipes_url else None
-    storage = StorageClient(storage_url) if storage_url else None
+    clients = {
+        "recipes": RecipesClient(recipes_url) if recipes_url else None,
+        "storage": StorageClient(storage_url) if storage_url else None,
+    }
+    hass.data[DOMAIN][entry.entry_id] = clients
 
-    hass.data[DOMAIN][entry.entry_id] = {"recipes": recipes, "storage": storage}
+    async def _client(kind: str):
+        """The add-on's client, looking again for an add-on that was not up at boot."""
+        if clients[kind] is None:
+            if kind == "recipes":
+                url = await discover_addon_url(
+                    slug_patterns=[ADDON_SLUG_RECIPES_PATTERN],
+                    port=RECIPES_PORT,
+                    health_path="/api/config",
+                )
+                clients[kind] = RecipesClient(url) if url else None
+            else:
+                url = await discover_addon_url(
+                    slug_patterns=[ADDON_SLUG_STORAGE_PATTERN], port=STORAGE_PORT
+                )
+                clients[kind] = StorageClient(url) if url else None
+        return clients[kind]
 
     async def _search_service(call: ServiceCall) -> dict:
+        recipes = await _client("recipes")
         if recipes is None:
             raise HomeAssistantError(
                 "HA-recipes add-on was not auto-discovered; cannot search recipes."
@@ -86,6 +105,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return {"count": len(matched), "recipes": matched}
 
     async def _scrape_service(call: ServiceCall) -> dict:
+        recipes = await _client("recipes")
         if recipes is None:
             raise HomeAssistantError(
                 "HA-recipes add-on was not auto-discovered; cannot scrape."
@@ -96,6 +116,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             raise HomeAssistantError(f"Scrape failed: {exc}") from exc
 
     async def _suggest_service(call: ServiceCall) -> dict:
+        storage = await _client("storage")
         if storage is None:
             raise HomeAssistantError(
                 "HA-storage add-on was not auto-discovered; cannot suggest recipes."

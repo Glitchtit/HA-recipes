@@ -10,16 +10,17 @@ from typing import Any
 def filter_recipes_by_query(
     recipes: list[dict[str, Any]], query: str
 ) -> list[dict[str, Any]]:
-    """Case-insensitive substring filter on recipe ``name``.
+    """Case-insensitive filter on recipe ``name``: every word of the query must
+    appear in it, in any order ("curry chicken" finds "Chicken curry").
 
     A blank/whitespace query returns the list unchanged (acts as "list all").
     The HA-recipes backend has no search route, so search is done client-side
     over the recipe list payload, whose only text field is ``name``.
     """
-    q = (query or "").strip().lower()
-    if not q:
+    words = (query or "").lower().split()
+    if not words:
         return recipes
-    return [r for r in recipes if q in (r.get("name") or "").lower()]
+    return [r for r in recipes if all(w in (r.get("name") or "").lower() for w in words)]
 
 
 async def run_scrape(recipes_client: Any, url: str) -> dict[str, Any]:

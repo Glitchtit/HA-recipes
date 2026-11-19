@@ -35,3 +35,8 @@ def test_filter_recipes_by_query_blank_returns_all():
 
 def test_filter_recipes_by_query_no_match_returns_empty():
     assert helpers.filter_recipes_by_query(RECIPES, "sushi") == []
+
+
+def test_filter_recipes_by_query_matches_words_in_any_order():
+    recipes = [{"id": 1, "name": "Chicken curry"}, {"id": 2, "name": "Chicken soup"}]
+    assert helpers.filter_recipes_by_query(recipes, "curry chicken") == [recipes[0]]
